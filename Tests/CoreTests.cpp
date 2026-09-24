@@ -4,6 +4,9 @@
 
 #include <algorithm>
 #include <array>
+#ifdef NDEBUG
+#undef NDEBUG // Keep the regression checks active in Release CI builds.
+#endif
 #include <cassert>
 #include <cmath>
 #include <iostream>
@@ -27,6 +30,87 @@ void testModel() {
         assert(t.highGain>0.0f&&t.highGain<=1.0f);
         assert(t.diffusionMs>=0.0f);
     }
+}
+
+float latestDelay(const early::TapModel& model) {
+    float latest = 0.0f;
+    for (int i=0;i<model.count;++i)
+        if (model.taps[size_t(i)].gain > 0.0f)
+            latest = std::max(latest, model.taps[size_t(i)].delayMs);
+    return latest;
+}
+
+float pathGain(const early::TapModel& model, int pathId) {
+    for (int i=0;i<model.count;++i)
+        if (model.taps[size_t(i)].pathId == pathId)
+            return model.taps[size_t(i)].gain;
+    return -1.0f;
+}
+
+void testRoomSizeAndFloorReflection() {
+    early::Parameters p;
+    for (float shape : {0.0f, 0.5f, 1.0f}) {
+        p.roomShape = shape;
+        for (float distance : {0.0f, 0.5f, 1.0f}) {
+            p.pattern = distance;
+            for (int faces=6;faces<=16;++faces) {
+                p.faces = faces;
+                float previous = 0.0f;
+                for (int step=0;step<=10;++step) {
+                    p.roomSize = float(step) / 10.0f;
+                    const auto model = early::buildModel(p);
+                    const float latest = latestDelay(model);
+                    assert(model.count == faces);
+                    assert(std::abs(latest - (18.0f + 92.0f*p.roomSize)) < 0.2f);
+                    assert(latest >= previous && latest <= 110.01f);
+                    previous = latest;
+                }
+            }
+            p.roomSize = 1.0f;
+            for (int faces=1;faces<=16;++faces) {
+                p.faces = faces;
+                assert(latestDelay(early::buildModel(p)) <= 110.01f);
+            }
+        }
+    }
+
+    p.faces = 6;
+    p.roomSize = 1.0f;
+    p.roomShape = 1.0f;
+    p.pattern = 0.0f;
+    const auto near = early::buildModel(p);
+    p.pattern = 0.5f;
+    const auto middle = early::buildModel(p);
+    p.pattern = 1.0f;
+    const auto far = early::buildModel(p);
+    assert(pathGain(near, 4) > pathGain(middle, 4));
+    assert(pathGain(middle, 4) > pathGain(far, 4));
+    assert(pathGain(far, 4) == 0.0f);
+    for (int i=0;i<far.count;++i)
+        assert(far.taps[size_t(i)].delayMs >= 3.0f || far.taps[size_t(i)].gain == 0.0f);
+}
+
+void testLearnedRoomSizeAndDistance() {
+    early::TapModel learned;
+    learned.count = 3;
+    learned.taps[0].delayMs = 2.0f;  learned.taps[0].gain = 0.8f;
+    learned.taps[1].delayMs = 25.0f; learned.taps[1].gain = 0.5f;
+    learned.taps[2].delayMs = 50.0f; learned.taps[2].gain = 0.3f;
+    early::Parameters reference;
+    reference.faces = 3;
+    reference.roomSize = 0.4f;
+    reference.pattern = 0.2f;
+    const auto matched = early::transformLearnedModel(learned, reference, reference);
+    assert(std::abs(latestDelay(matched) - 50.0f) < 0.01f);
+    auto changed = reference;
+    changed.roomSize = 1.0f;
+    const auto large = early::transformLearnedModel(learned, changed, reference);
+    assert(std::abs(latestDelay(large) - 110.0f) < 0.01f);
+    changed = reference;
+    changed.pattern = 1.0f;
+    const auto far = early::transformLearnedModel(learned, changed, reference);
+    assert(pathGain(far, 100) == 0.0f);
+    assert(pathGain(far, 101) > 0.0f);
 }
 
 std::array<double,2> renderImpulse(bool leftInput) {
@@ -115,4 +199,4 @@ void testEngineFiniteAcrossRates() {
 }
 }
 
-int main(){testModel();testStereoSymmetry();testLearn();testEngineFiniteAcrossRates();std::cout<<"EarlyCore tests passed\n";return 0;}
+int main(){testModel();testRoomSizeAndFloorReflection();testLearnedRoomSizeAndDistance();testStereoSymmetry();testLearn();testEngineFiniteAcrossRates();std::cout<<"EarlyCore tests passed\n";return 0;}

@@ -7,9 +7,10 @@ Early Pocket is a dedicated early-reflections processor built with JUCE. Version
 - True stereo-in/stereo-out reflection routing; the old left-biased mono collapse is removed.
 - Cubic fractional-delay interpolation instead of linear interpolation.
 - Each visible reflection is rendered as a small deterministic micro-cluster. Later paths become progressively more diffuse without random pitch movement.
-- Six first-order paths are generated from a rectangular image-source model (left/right/front/rear/floor/ceiling). Faces above six add selected second-order paths.
+- Six first-order paths are generated from a rectangular image-source model (left/right/front/rear/floor/ceiling). Faces above six add selected second-order paths. At 12 or more Faces, one slot retains a quieter long path so the room can reach its full early-reflection span.
 - Per-path distance loss, wall reflectivity, air/HF absorption, stereo spread and decorrelation.
-- Room Size, Room Shape, Width and Distance now transform timing, geometry, buildup and spectral behaviour rather than only scaling fixed taps.
+- With six or more Faces, Room Size sets the latest procedural reflection linearly from 18 ms to 110 ms. Other paths keep their geometry-derived relative spacing. Distance fades floor-involving paths as the source moves toward Far, avoiding a strong sub-millisecond floor reflection.
+- Room Shape and Width transform geometry, buildup and stereo behaviour.
 - Smooth model crossfades, EQ coefficient crossfades and equal-power smoothed Mix.
 - Neutral default post-EQ (180 Hz / 900 Hz / 4.5 kHz, 0 dB).
 - Expensive delay, pan and cluster coefficients are precomputed when the model changes rather than in the sample loop.
@@ -18,7 +19,7 @@ Early Pocket is a dedicated early-reflections processor built with JUCE. Version
 
 Without a sidechain, Learn performs autonomous analysis of the main/room signal. With the sidechain enabled, the main input is treated as the room/processed recording and the sidechain as the dry reference. The host should present those two paths time-aligned (normal plug-in delay compensation is sufficient); Learn intentionally does not guess arbitrary recording offsets because periodic material can make automatic lag estimation ambiguous. Learn uses transient persistence and whitened normalized correlation at 0.5 ms profile resolution, sub-bin peak interpolation, source-width-compensated stereo analysis and a six-band direct-vs-reflection spectral estimate.
 
-The detected delays, levels, pan, spectral damping and diffusion are retained as a learned base model. After learning, Room Size / Shape / Width / Distance transform that measured model. Increasing Faces beyond the measured tap count supplements it with geometry-generated paths.
+The detected delays, levels, pan, spectral damping and diffusion are retained as a learned base model. After learning, Room Size changes the latest retained delay linearly from its measured position toward 110 ms at the maximum setting. Room Shape / Width / Distance transform the measured model; moving Distance toward Far fades very short learned taps. Increasing Faces beyond the measured tap count supplements it with geometry-generated paths.
 
 ## Local build
 

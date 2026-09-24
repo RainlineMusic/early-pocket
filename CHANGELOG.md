@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Make the full Room Size range reach approximately 110 ms linearly with six or more Faces, while retaining geometry-derived spacing between reflections.
+- Reserve one late image-source path so the long reflection is not discarded by level-only path selection.
+- Fade floor-related reflections toward Far to remove the strong near-zero-delay comb; fade short learned taps when Distance is moved beyond the learned position.
+- Bound Room Size stretching of learned reflections at 110 ms and add core coverage for timing and floor-path behaviour.
+
 ## 0.4.0
 
 - Rebuilt the early-reflection renderer as a true-stereo engine.

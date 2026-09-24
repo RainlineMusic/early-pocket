@@ -8,12 +8,22 @@
 namespace early {
 namespace {
 constexpr float speedOfSound = 343.0f;
+constexpr float maximumEarlyDelayMs = 110.0f;
 
 struct Vec3 { float x = 0.0f, y = 0.0f, z = 0.0f; };
 struct Room { float width = 5.0f, depth = 7.0f, height = 3.0f; Vec3 source{}, listener{}; };
 struct Candidate { Tap tap{}; float salience = 0.0f; };
 
 float clamp01(float v) noexcept { return std::clamp(v, 0.0f, 1.0f); }
+float reflectionSpanMs(float size) noexcept { return 18.0f + 92.0f * clamp01(size); }
+float floorPresence(float distance) noexcept {
+    const float near = 1.0f - clamp01(distance);
+    return near * near;
+}
+float smoothstep(float low, float high, float value) noexcept {
+    const float x = clamp01((value - low) / (high - low));
+    return x * x * (3.0f - 2.0f * x);
+}
 float length(Vec3 v) noexcept { return std::sqrt(v.x*v.x + v.y*v.y + v.z*v.z); }
 Vec3 subtract(Vec3 a, Vec3 b) noexcept { return {a.x-b.x, a.y-b.y, a.z-b.z}; }
 std::uint64_t mixHash(std::uint64_t h, int v) noexcept {
@@ -147,6 +157,7 @@ TapModel buildModel(const Parameters& p) noexcept {
     TapModel out;
     const int faces = std::clamp(p.faces, 1, 16);
     const float shape = clamp01(p.roomShape);
+    const float floorGain = floorPresence(p.pattern);
     const Room room = makeRoom(p);
 
     std::array<Candidate, 6> first{};
@@ -154,6 +165,7 @@ TapModel buildModel(const Parameters& p) noexcept {
         const float refl = wallReflectivity(wall, shape);
         first[size_t(wall)].tap = makePath(reflect(room.source, wall, room), room,
                                                 refl, wallHighGain(wall, shape), wall, 1, p);
+        if (wall == 4) first[size_t(wall)].tap.gain *= floorGain;
         first[size_t(wall)].salience = first[size_t(wall)].tap.gain
                                     / std::sqrt(1.0f + first[size_t(wall)].tap.delayMs * 0.018f);
     }
@@ -180,10 +192,12 @@ TapModel buildModel(const Parameters& p) noexcept {
             const float hi = wallHighGain(a,shape) * wallHighGain(b,shape);
             const Vec3 image = reflect(reflect(room.source,a,room),b,room);
             auto t = makePath(image, room, coeff, hi, 6 + candidateCount, 2, p);
+            if (a == 4 || b == 4) t.gain *= floorGain;
             second[size_t(candidateCount++)] = {t, t.gain / std::sqrt(1.0f + t.delayMs*0.022f)};
             if ((a==0&&b==1)||(a==2&&b==3)||(a==4&&b==5)) {
                 const Vec3 reverseImage = reflect(reflect(room.source,b,room),a,room);
                 auto rt = makePath(reverseImage, room, coeff, hi, 30 + candidateCount, 2, p);
+                if (a == 4 || b == 4) rt.gain *= floorGain;
                 second[size_t(candidateCount++)] = {rt, rt.gain / std::sqrt(1.0f + rt.delayMs*0.022f)};
             }
         }
@@ -193,8 +207,33 @@ TapModel buildModel(const Parameters& p) noexcept {
             second[size_t(j)]=key;
         }
         const int wanted = faces - 6;
-        for (int i=0;i<wanted && i<candidateCount && out.count<maxTaps;++i)
-            out.taps[size_t(out.count++)] = second[size_t(i)].tap;
+        // Reserve one slot for a quiet long path once the room has enough faces.
+        // Ranking every path by level alone discards the paths beyond ~50 ms.
+        int lateIndex = -1;
+        if (faces >= 12) {
+            for (int i=0;i<candidateCount;++i)
+                if (lateIndex < 0 || second[size_t(i)].tap.delayMs > second[size_t(lateIndex)].tap.delayMs)
+                    lateIndex = i;
+        }
+        const int strongCount = wanted - (lateIndex >= 0 ? 1 : 0);
+        for (int i=0;i<candidateCount && out.count<6+strongCount;++i)
+            if (i != lateIndex) out.taps[size_t(out.count++)] = second[size_t(i)].tap;
+        if (lateIndex >= 0 && out.count < maxTaps)
+            out.taps[size_t(out.count++)] = second[size_t(lateIndex)].tap;
+
+    }
+
+    if (faces >= 6) {
+        // Room Size controls the complete time span linearly. The image-source
+        // geometry still determines the relative spacing of the reflections.
+        float longest = 0.0f;
+        for (int i=0;i<out.count;++i)
+            if (out.taps[size_t(i)].gain > 0.0f)
+                longest = std::max(longest, out.taps[size_t(i)].delayMs);
+        const float timeScale = reflectionSpanMs(p.roomSize) / std::max(1.0f, longest);
+        for (int i=0;i<out.count;++i)
+            out.taps[size_t(i)].delayMs = std::clamp(out.taps[size_t(i)].delayMs * timeScale,
+                                                     0.75f, maximumEarlyDelayMs);
     }
 
     float energy = 0.0f;
@@ -217,10 +256,9 @@ TapModel transformLearnedModel(const TapModel& learned,
     const int desiredCount = std::clamp(current.faces,1,16);
     out.count = std::min(desiredCount, learned.count);
     const float referenceMedian = std::max(1.0f, medianDelay(learned));
-    const float sizeDelta = current.roomSize - learnedReference.roomSize;
-    const float timeScale = std::pow(3.2f, sizeDelta);
     const float shapeDelta = current.roomShape - learnedReference.roomShape;
     const float distanceDelta = current.pattern - learnedReference.pattern;
+    const float farther = clamp01(distanceDelta / std::max(0.01f, 1.0f - clamp01(learnedReference.pattern)));
     const float widthRatio = (0.20f + std::clamp(current.width,0.0f,2.0f))
                            / (0.20f + std::clamp(learnedReference.width,0.0f,2.0f));
 
@@ -228,14 +266,32 @@ TapModel transformLearnedModel(const TapModel& learned,
     for(int i=0;i<learned.count;++i) ids[size_t(i)] = i;
     for(int i=1;i<learned.count;++i){const int key=ids[size_t(i)];int j=i;while(j>0&&learned.taps[size_t(key)].gain>learned.taps[size_t(ids[size_t(j-1)])].gain){ids[size_t(j)]=ids[size_t(j-1)];--j;}ids[size_t(j)]=key;}
 
+    float learnedLast = 0.0f;
+    for (int i=0;i<out.count;++i)
+        learnedLast = std::max(learnedLast, learned.taps[size_t(ids[size_t(i)])].delayMs);
+    const float referenceLast = std::min(learnedLast, maximumEarlyDelayMs);
+    const float referenceSize = clamp01(learnedReference.roomSize);
+    const float currentSize = clamp01(current.roomSize);
+    const float smallestLast = std::min(18.0f, referenceLast * 0.4f);
+    float desiredLast = referenceLast;
+    if (currentSize < referenceSize && referenceSize > 0.0f)
+        desiredLast = smallestLast + (referenceLast - smallestLast) * currentSize / referenceSize;
+    else if (currentSize > referenceSize && referenceSize < 1.0f)
+        desiredLast = referenceLast + (maximumEarlyDelayMs - referenceLast)
+                                 * (currentSize - referenceSize) / (1.0f - referenceSize);
+    const float timeScale = desiredLast / std::max(0.75f, learnedLast);
+
     const float learnedToneGain = std::pow(10.0f, std::clamp(learnedHighToneDb,-18.0f,12.0f)/20.0f);
     for(int n=0;n<out.count;++n){
         Tap t=learned.taps[size_t(ids[size_t(n)])];
         const float normalized = (t.delayMs-referenceMedian)/referenceMedian;
         const float warp = 1.0f + shapeDelta * 0.22f * std::tanh(normalized);
-        t.delayMs = std::clamp(t.delayMs*timeScale*warp*(1.0f+0.12f*distanceDelta),0.75f,300.0f);
+        t.delayMs = std::clamp(t.delayMs*timeScale*warp,0.75f,maximumEarlyDelayMs);
         t.gain *= std::pow(10.0f, -2.2f*distanceDelta/20.0f)
                 * std::pow(std::max(0.45f,timeScale), -0.28f);
+        // A measured short tap cannot be identified as a floor path with certainty.
+        // Fade it only when Distance is moved beyond the learned reference position.
+        t.gain *= 1.0f - farther * (1.0f - smoothstep(5.0f, 12.0f, learned.taps[size_t(ids[size_t(n)])].delayMs));
         t.pan = std::tanh(t.pan * widthRatio);
         const float baseHigh = t.highGain > 0.0f ? t.highGain : learnedToneGain;
         t.highGain = std::clamp(baseHigh
@@ -249,6 +305,15 @@ TapModel transformLearnedModel(const TapModel& learned,
                                      + 0.20f*t.diffusionMs*std::max(0.0f,current.width-0.7f),0.0f,1.5f);
         t.pathId = 100 + ids[size_t(n)];
         out.taps[size_t(n)] = t;
+    }
+
+    float transformedLast = 0.0f;
+    for (int i=0;i<out.count;++i) transformedLast = std::max(transformedLast, out.taps[size_t(i)].delayMs);
+    if (transformedLast > 0.0f) {
+        const float correction = desiredLast / transformedLast;
+        for (int i=0;i<out.count;++i)
+            out.taps[size_t(i)].delayMs = std::clamp(out.taps[size_t(i)].delayMs * correction,
+                                                     0.75f, maximumEarlyDelayMs);
     }
 
     if(out.count < desiredCount){
