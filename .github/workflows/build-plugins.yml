@@ -1,0 +1,199 @@
+name: Build plug-ins
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: early-pocket-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JUCE_VERSION: 8.0.4
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-2022
+    env:
+      AAX_SDK_URL: ${{ secrets.AAX_SDK_URL }}
+      AAX_SDK_TOKEN: ${{ secrets.AAX_SDK_TOKEN }}
+    steps:
+      - name: Check out Early Pocket
+        uses: actions/checkout@v4
+
+      - name: Check out JUCE
+        uses: actions/checkout@v4
+        with:
+          repository: juce-framework/JUCE
+          ref: ${{ env.JUCE_VERSION }}
+          path: JUCE
+          fetch-depth: 1
+
+      - name: Download authorized AAX SDK
+        shell: pwsh
+        run: |
+          if (-not $env:AAX_SDK_URL) {
+            throw "AAX_SDK_URL is required. Store an authorized AAX SDK ZIP URL in the repository secret AAX_SDK_URL."
+          }
+          $headers = @{}
+          if ($env:AAX_SDK_TOKEN) { $headers.Authorization = "Bearer $env:AAX_SDK_TOKEN" }
+          $zip = Join-Path $env:RUNNER_TEMP "aax-sdk.zip"
+          $root = Join-Path $env:RUNNER_TEMP "aax-sdk"
+          Invoke-WebRequest -Uri $env:AAX_SDK_URL -Headers $headers -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $root -Force
+          $header = Get-ChildItem -Path $root -Filter AAX.h -Recurse | Where-Object { $_.Directory.Name -eq "Interfaces" } | Select-Object -First 1
+          if (-not $header) { throw "The downloaded archive does not contain Interfaces/AAX.h." }
+          $sdkPath = Split-Path (Split-Path $header.FullName -Parent) -Parent
+          "AAX_SDK_PATH=$sdkPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -S . -B build-win -G "Visual Studio 17 2022" -A x64 `
+            "-DJUCE_DIR=$env:GITHUB_WORKSPACE\JUCE" `
+            "-DAAX_SDK_PATH=$env:AAX_SDK_PATH" `
+            -DBUILD_TESTING=ON
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Test core DSP
+        shell: pwsh
+        run: |
+          cmake --build build-win --config Release --target EarlyCoreTests --parallel 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ctest --test-dir build-win -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build VST3 and AAX
+        shell: pwsh
+        run: |
+          cmake --build build-win --config Release --target EarlyPocket_VST3 EarlyPocket_AAX --parallel 4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Package Windows plug-ins
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          Compress-Archive -Path "build-win/EarlyPocket_artefacts/Release/VST3/Early Pocket.vst3" -DestinationPath "artifacts/Early-Pocket-Windows-VST3.zip" -Force
+          Compress-Archive -Path "build-win/EarlyPocket_artefacts/Release/AAX/Early Pocket.aaxplugin" -DestinationPath "artifacts/Early-Pocket-Windows-AAX.zip" -Force
+
+      - name: Upload Windows VST3
+        uses: actions/upload-artifact@v4
+        with:
+          name: Early-Pocket-Windows-VST3
+          path: artifacts/Early-Pocket-Windows-VST3.zip
+          if-no-files-found: error
+
+      - name: Upload Windows AAX
+        uses: actions/upload-artifact@v4
+        with:
+          name: Early-Pocket-Windows-AAX
+          path: artifacts/Early-Pocket-Windows-AAX.zip
+          if-no-files-found: error
+
+  macos:
+    name: macOS Universal
+    runs-on: macos-15
+    env:
+      AAX_SDK_URL: ${{ secrets.AAX_SDK_URL }}
+      AAX_SDK_TOKEN: ${{ secrets.AAX_SDK_TOKEN }}
+    steps:
+      - name: Check out Early Pocket
+        uses: actions/checkout@v4
+
+      - name: Check out JUCE
+        uses: actions/checkout@v4
+        with:
+          repository: juce-framework/JUCE
+          ref: ${{ env.JUCE_VERSION }}
+          path: JUCE
+          fetch-depth: 1
+
+      - name: Download authorized AAX SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${AAX_SDK_URL:-}" ]]; then
+            echo "AAX_SDK_URL is required. Store an authorized AAX SDK ZIP URL in the repository secret AAX_SDK_URL." >&2
+            exit 1
+          fi
+          zip="$RUNNER_TEMP/aax-sdk.zip"
+          root="$RUNNER_TEMP/aax-sdk"
+          args=(-fL --retry 3 --retry-delay 2)
+          if [[ -n "${AAX_SDK_TOKEN:-}" ]]; then args+=(-H "Authorization: Bearer $AAX_SDK_TOKEN"); fi
+          curl "${args[@]}" "$AAX_SDK_URL" -o "$zip"
+          mkdir -p "$root"
+          ditto -x -k "$zip" "$root"
+          header="$(find "$root" -type f -path '*/Interfaces/AAX.h' -print -quit)"
+          if [[ -z "$header" ]]; then echo "The downloaded archive does not contain Interfaces/AAX.h." >&2; exit 1; fi
+          sdk_path="$(dirname "$(dirname "$header")")"
+          echo "AAX_SDK_PATH=$sdk_path" >> "$GITHUB_ENV"
+
+      - name: Configure Universal build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S . -B build-mac -G Xcode \
+            -DJUCE_DIR="$GITHUB_WORKSPACE/JUCE" \
+            -DAAX_SDK_PATH="$AAX_SDK_PATH" \
+            -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            -DBUILD_TESTING=ON
+
+      - name: Test core DSP
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build-mac --config Release --target EarlyCoreTests --parallel 4
+          ctest --test-dir build-mac -C Release --output-on-failure
+
+      - name: Build VST3 and AAX
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build-mac --config Release --target EarlyPocket_VST3 EarlyPocket_AAX --parallel 4
+
+      - name: Verify Universal binaries and bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          vst_bundle="build-mac/EarlyPocket_artefacts/Release/VST3/Early Pocket.vst3"
+          aax_bundle="build-mac/EarlyPocket_artefacts/Release/AAX/Early Pocket.aaxplugin"
+          vst="$vst_bundle/Contents/MacOS/Early Pocket"
+          aax="$aax_bundle/Contents/MacOS/Early Pocket"
+          for binary in "$vst" "$aax"; do
+            test -f "$binary"
+            archs="$(lipo -archs "$binary")"
+            echo "$binary: $archs"
+            [[ "$archs" == *arm64* && "$archs" == *x86_64* ]]
+          done
+          test -f "$vst_bundle/Contents/Resources/moduleinfo.json"
+          codesign --verify --deep --strict --verbose=2 "$vst_bundle"
+          codesign --verify --deep --strict --verbose=2 "$aax_bundle"
+
+      - name: Package macOS plug-ins
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          ditto -c -k --sequesterRsrc --keepParent "build-mac/EarlyPocket_artefacts/Release/VST3/Early Pocket.vst3" "artifacts/Early-Pocket-macOS-Universal-VST3.zip"
+          ditto -c -k --sequesterRsrc --keepParent "build-mac/EarlyPocket_artefacts/Release/AAX/Early Pocket.aaxplugin" "artifacts/Early-Pocket-macOS-Universal-AAX.zip"
+
+      - name: Upload macOS Universal VST3
+        uses: actions/upload-artifact@v4
+        with:
+          name: Early-Pocket-macOS-Universal-VST3
+          path: artifacts/Early-Pocket-macOS-Universal-VST3.zip
+          if-no-files-found: error
+
+      - name: Upload macOS Universal AAX
+        uses: actions/upload-artifact@v4
+        with:
+          name: Early-Pocket-macOS-Universal-AAX
+          path: artifacts/Early-Pocket-macOS-Universal-AAX.zip
+          if-no-files-found: error
