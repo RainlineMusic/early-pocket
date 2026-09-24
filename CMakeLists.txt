@@ -9,18 +9,7 @@ if(NOT DEFINED JUCE_DIR OR NOT EXISTS "${JUCE_DIR}/CMakeLists.txt")
     message(FATAL_ERROR "Set JUCE_DIR to a local JUCE source checkout, for example -DJUCE_DIR=/path/to/JUCE")
 endif()
 
-set(EARLY_FORMATS VST3)
-if(DEFINED AAX_SDK_PATH)
-    if(NOT EXISTS "${AAX_SDK_PATH}/Interfaces/AAX.h")
-        message(FATAL_ERROR "AAX_SDK_PATH must point to the root of the AAX SDK")
-    endif()
-    list(APPEND EARLY_FORMATS AAX)
-endif()
-
 add_subdirectory("${JUCE_DIR}" JUCE)
-if(DEFINED AAX_SDK_PATH)
-    juce_set_aax_sdk_path("${AAX_SDK_PATH}")
-endif()
 
 add_library(EarlyCore STATIC
     Source/Core/EarlyModel.cpp
@@ -31,6 +20,7 @@ add_library(EarlyCore STATIC
     Source/Core/LearnAnalyzer.h)
 target_include_directories(EarlyCore PUBLIC Source)
 set_target_properties(EarlyCore PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 if(MSVC)
     target_compile_options(EarlyCore PRIVATE /W4 /permissive- /utf-8)
 else()
@@ -43,7 +33,7 @@ juce_add_plugin(EarlyPocket
     AAX_IDENTIFIER "com.earlypocket.audio"
     PLUGIN_MANUFACTURER_CODE Epkt
     PLUGIN_CODE ErPk
-    FORMATS ${EARLY_FORMATS}
+    FORMATS VST3 AAX
     PRODUCT_NAME "Early Pocket"
     DESCRIPTION "Early reflections processor"
     IS_SYNTH FALSE
@@ -57,11 +47,13 @@ juce_add_plugin(EarlyPocket
     AAX_CATEGORY Reverb)
 
 juce_generate_juce_header(EarlyPocket)
+
 target_sources(EarlyPocket PRIVATE
     Source/Plugin/PluginProcessor.cpp
     Source/Plugin/PluginProcessor.h
     Source/Plugin/PluginEditor.cpp
     Source/Plugin/PluginEditor.h)
+
 target_link_libraries(EarlyPocket PRIVATE
     EarlyCore
     juce::juce_audio_utils
@@ -70,22 +62,25 @@ target_link_libraries(EarlyPocket PRIVATE
     juce::juce_recommended_config_flags
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags)
+
 target_compile_definitions(EarlyPocket PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0)
 
+if(MSVC)
+    target_compile_options(EarlyPocket PRIVATE /utf-8)
+endif()
+
 if(TARGET EarlyPocket_VST3)
-    # JUCE's manifest helper must be able to load the plug-in. On macOS an
-    # ad-hoc signature is therefore applied before manifest generation. The
-    # manifest is written into the bundle, so sign once more afterwards to
-    # leave the final bundle internally consistent.
     if(APPLE)
         add_custom_command(TARGET EarlyPocket_VST3 POST_BUILD
             COMMAND codesign --force --deep --sign - "$<TARGET_BUNDLE_DIR:EarlyPocket_VST3>"
             VERBATIM)
     endif()
+
     juce_enable_vst3_manifest_step(EarlyPocket)
+
     if(APPLE)
         add_custom_command(TARGET EarlyPocket_VST3 POST_BUILD
             COMMAND codesign --force --deep --sign - "$<TARGET_BUNDLE_DIR:EarlyPocket_VST3>"
@@ -103,10 +98,12 @@ include(CTest)
 if(BUILD_TESTING)
     add_executable(EarlyCoreTests Tests/CoreTests.cpp)
     target_link_libraries(EarlyCoreTests PRIVATE EarlyCore)
+
     if(MSVC)
         target_compile_options(EarlyCoreTests PRIVATE /W4 /permissive- /utf-8)
     else()
         target_compile_options(EarlyCoreTests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
+
     add_test(NAME EarlyCoreTests COMMAND EarlyCoreTests)
 endif()
