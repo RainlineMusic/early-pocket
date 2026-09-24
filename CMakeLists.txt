@@ -29,12 +29,12 @@ endif()
 
 juce_add_plugin(EarlyPocket
     COMPANY_NAME "Early Pocket"
-    BUNDLE_ID "com.earlypocket.audio"
-    AAX_IDENTIFIER "com.earlypocket.audio"
+    BUNDLE_ID "com.earlypocket.audio.pro"
+    AAX_IDENTIFIER "com.earlypocket.audio.pro"
     PLUGIN_MANUFACTURER_CODE Epkt
-    PLUGIN_CODE ErPk
+    PLUGIN_CODE ErCm
     FORMATS VST3 AAX
-    PRODUCT_NAME "Early Pocket"
+    PRODUCT_NAME "Early Pocket Pro"
     DESCRIPTION "Early reflections processor"
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT FALSE
