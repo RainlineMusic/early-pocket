@@ -31,15 +31,49 @@ private:
     };
     struct StereoFilter { Biquad l, r; };
 
+    struct TapState { float lowL = 0.0f, lowR = 0.0f; };
+    struct DelayRead {
+        int whole = 1;
+        float cm1 = 0.0f, c0 = 1.0f, c1 = 0.0f, c2 = 0.0f;
+    };
+    struct RenderTap {
+        std::array<DelayRead, 7> delayL{};
+        std::array<DelayRead, 7> delayR{};
+        std::array<float, 7> weights{};
+        int clusterCount = 1;
+        float gain = 0.0f;
+        float lowGain = 1.0f, highGain = 1.0f, lowAlpha = 0.0f;
+        float gLL = 1.0f, gLR = 0.0f, gRL = 0.0f, gRR = 1.0f;
+    };
+    struct RenderModel {
+        std::array<RenderTap, maxTaps> taps{};
+        int count = 0;
+        std::uint64_t fingerprint = 0;
+        float tailMs = 0.0f;
+    };
+
     double rate = 48000.0;
     std::vector<std::array<float, 2>> delay;
     int write = 0, fadeRemaining = 0, fadeLength = 1;
-    TapModel current{}, previous{};
-    std::array<StereoFilter, 5> filters{};
-    float bypassMix = 0.0f;
+    RenderModel current{}, previous{};
+    std::array<TapState, maxTaps> currentState{}, previousState{};
 
-    std::array<float, 2> render(const TapModel&) const noexcept;
-    void updateFilter(int index, float frequency, float q, float gainDb, int type);
+    std::array<StereoFilter, 5> filters{}, previousFilters{};
+    int eqFadeRemaining = 0, eqFadeLength = 1;
+    bool eqInitialised = false;
+
+    float bypassMix = 0.0f;
+    float mixSmoothed = 0.0f, mixSmoothingCoeff = 0.0f;
+    bool mixInitialised = false;
+
+    float readDelay(int channel, const DelayRead&) const noexcept;
+    DelayRead makeDelayRead(float delaySamples) const noexcept;
+    RenderModel makeRenderModel(const TapModel&) const noexcept;
+    std::array<float, 2> render(const RenderModel&, std::array<TapState, maxTaps>&) noexcept;
+    static std::array<float, 2> applyFilters(std::array<StereoFilter, 5>&,
+                                              std::array<float, 2>) noexcept;
+    void updateFilter(std::array<StereoFilter, 5>& bank, int index,
+                      float frequency, float q, float gainDb, int type);
 };
 
 } // namespace early

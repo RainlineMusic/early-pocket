@@ -9,9 +9,10 @@ enum class Confidence { weak, fair, good };
 
 struct TargetSummary {
     TapModel taps;
-    std::array<float, 3> toneDb{};
-    float stereoWidth = 0.0f;
+    std::array<float, 6> toneDb{};
+    float stereoWidth = 1.0f;
     bool stereoMeasured = false;
+    bool usedDryReference = false;
     Confidence confidence = Confidence::weak;
     int onsetCount = 0;
 };
@@ -25,7 +26,9 @@ struct FitResult {
 
 class LearnAnalyzer {
 public:
-    TargetSummary analyze(const float* left, const float* right, int samples, double sampleRate) const;
+    TargetSummary analyze(const float* roomLeft, const float* roomRight,
+                          const float* dryLeft, const float* dryRight,
+                          int samples, double sampleRate) const;
     FitResult fit(const TargetSummary&) const;
 };
 

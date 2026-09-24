@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(EarlyPocket VERSION 0.3.0 LANGUAGES C CXX)
+project(EarlyPocket VERSION 0.4.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,11 +14,13 @@ if(DEFINED AAX_SDK_PATH)
     if(NOT EXISTS "${AAX_SDK_PATH}/Interfaces/AAX.h")
         message(FATAL_ERROR "AAX_SDK_PATH must point to the root of the AAX SDK")
     endif()
-    set(JUCE_GLOBAL_AAX_SDK_PATH "${AAX_SDK_PATH}")
     list(APPEND EARLY_FORMATS AAX)
 endif()
 
 add_subdirectory("${JUCE_DIR}" JUCE)
+if(DEFINED AAX_SDK_PATH)
+    juce_set_aax_sdk_path("${AAX_SDK_PATH}")
+endif()
 
 add_library(EarlyCore STATIC
     Source/Core/EarlyModel.cpp
@@ -28,6 +30,7 @@ add_library(EarlyCore STATIC
     Source/Core/LearnAnalyzer.cpp
     Source/Core/LearnAnalyzer.h)
 target_include_directories(EarlyCore PUBLIC Source)
+set_target_properties(EarlyCore PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
     target_compile_options(EarlyCore PRIVATE /W4 /permissive- /utf-8)
 else()
@@ -73,6 +76,15 @@ target_compile_definitions(EarlyPocket PUBLIC
     JUCE_VST3_CAN_REPLACE_VST2=0)
 
 if(TARGET EarlyPocket_VST3)
+    # JUCE's manifest helper must be able to load the plug-in. On macOS an
+    # ad-hoc signature is therefore applied before manifest generation. The
+    # manifest is written into the bundle, so sign once more afterwards to
+    # leave the final bundle internally consistent.
+    if(APPLE)
+        add_custom_command(TARGET EarlyPocket_VST3 POST_BUILD
+            COMMAND codesign --force --deep --sign - "$<TARGET_BUNDLE_DIR:EarlyPocket_VST3>"
+            VERBATIM)
+    endif()
     juce_enable_vst3_manifest_step(EarlyPocket)
     if(APPLE)
         add_custom_command(TARGET EarlyPocket_VST3 POST_BUILD
@@ -85,4 +97,16 @@ if(TARGET EarlyPocket_AAX AND APPLE)
     add_custom_command(TARGET EarlyPocket_AAX POST_BUILD
         COMMAND codesign --force --deep --sign - "$<TARGET_BUNDLE_DIR:EarlyPocket_AAX>"
         VERBATIM)
+endif()
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(EarlyCoreTests Tests/CoreTests.cpp)
+    target_link_libraries(EarlyCoreTests PRIVATE EarlyCore)
+    if(MSVC)
+        target_compile_options(EarlyCoreTests PRIVATE /W4 /permissive- /utf-8)
+    else()
+        target_compile_options(EarlyCoreTests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME EarlyCoreTests COMMAND EarlyCoreTests)
 endif()
