@@ -13,7 +13,7 @@ on:
 
 jobs:
   windows-x64:
-    runs-on: windows-latest
+    runs-on: windows-2022
     env:
       AAX_SDK_URL: ${{ secrets.AAX_SDK_URL }}
       AAX_SDK_TOKEN: ${{ secrets.AAX_SDK_TOKEN }}
