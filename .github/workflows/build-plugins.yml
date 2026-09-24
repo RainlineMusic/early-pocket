@@ -54,8 +54,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VST3="build/EarlyPocket_artefacts/Release/VST3/Early Pocket.vst3"
-          AAX="build/EarlyPocket_artefacts/Release/AAX/Early Pocket.aaxplugin"
+          VST3="build/EarlyPocket_artefacts/Release/VST3/Early Pocket Pro.vst3"
+          AAX="build/EarlyPocket_artefacts/Release/AAX/Early Pocket Pro.aaxplugin"
 
           codesign --force --deep --sign - "$VST3"
           codesign --force --deep --sign - "$AAX"
@@ -63,8 +63,8 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$VST3"
           codesign --verify --deep --strict --verbose=2 "$AAX"
 
-          lipo "$VST3/Contents/MacOS/Early Pocket" -verify_arch arm64 x86_64
-          lipo "$AAX/Contents/MacOS/Early Pocket" -verify_arch arm64 x86_64
+          lipo "$VST3/Contents/MacOS/Early Pocket Pro" -verify_arch arm64 x86_64
+          lipo "$AAX/Contents/MacOS/Early Pocket Pro" -verify_arch arm64 x86_64
 
           test -f "$VST3/Contents/Resources/moduleinfo.json"
 
@@ -75,15 +75,15 @@ jobs:
           curl -fL https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_macOS.zip -o pluginval.zip
           unzip -q pluginval.zip
           chmod +x pluginval.app/Contents/MacOS/pluginval
-          pluginval.app/Contents/MacOS/pluginval --strictness-level 5 --validate "$PWD/build/EarlyPocket_artefacts/Release/VST3/Early Pocket.vst3" 2>&1 | tee pluginval-macos.log
+          pluginval.app/Contents/MacOS/pluginval --strictness-level 5 --validate "$PWD/build/EarlyPocket_artefacts/Release/VST3/Early Pocket Pro.vst3" 2>&1 | tee pluginval-macos.log
 
       - name: Package macOS plug-ins
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          ditto -c -k --sequesterRsrc --keepParent "build/EarlyPocket_artefacts/Release/VST3/Early Pocket.vst3" "artifacts/Early-Pocket-macOS-Universal-VST3.zip"
-          ditto -c -k --sequesterRsrc --keepParent "build/EarlyPocket_artefacts/Release/AAX/Early Pocket.aaxplugin" "artifacts/Early-Pocket-macOS-Universal-AAX.zip"
+          ditto -c -k --sequesterRsrc --keepParent "build/EarlyPocket_artefacts/Release/VST3/Early Pocket Pro.vst3" "artifacts/Early-Pocket-macOS-Universal-VST3.zip"
+          ditto -c -k --sequesterRsrc --keepParent "build/EarlyPocket_artefacts/Release/AAX/Early Pocket Pro.aaxplugin" "artifacts/Early-Pocket-macOS-Universal-AAX.zip"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -145,15 +145,15 @@ jobs:
           Expand-Archive pluginval.zip -DestinationPath pluginval-unpack
           $validator = (Get-ChildItem pluginval-unpack -Recurse -Filter pluginval.exe | Select-Object -First 1).FullName
           if (-not $validator) { throw "pluginval executable not found" }
-          & $validator --strictness-level 5 --validate "$PWD/build/EarlyPocket_artefacts/Release/VST3/Early Pocket.vst3" 2>&1 | Tee-Object -FilePath pluginval-windows.log
+          & $validator --strictness-level 5 --validate "$PWD/build/EarlyPocket_artefacts/Release/VST3/Early Pocket Pro.vst3" 2>&1 | Tee-Object -FilePath pluginval-windows.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Package Windows plug-ins
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
-          Compress-Archive -Path "build/EarlyPocket_artefacts/Release/VST3/Early Pocket.vst3" -DestinationPath "artifacts/Early-Pocket-Windows-x64-VST3.zip" -Force
-          Compress-Archive -Path "build/EarlyPocket_artefacts/Release/AAX/Early Pocket.aaxplugin" -DestinationPath "artifacts/Early-Pocket-Windows-x64-AAX.zip" -Force
+          Compress-Archive -Path "build/EarlyPocket_artefacts/Release/VST3/Early Pocket Pro.vst3" -DestinationPath "artifacts/Early-Pocket-Windows-x64-VST3.zip" -Force
+          Compress-Archive -Path "build/EarlyPocket_artefacts/Release/AAX/Early Pocket Pro.aaxplugin" -DestinationPath "artifacts/Early-Pocket-Windows-x64-AAX.zip" -Force
 
       - uses: actions/upload-artifact@v4
         with:
