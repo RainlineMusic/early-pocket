@@ -51,8 +51,8 @@ private:
     mutable juce::SpinLock dataLock; early::TargetSummary target{},pendingTarget{}; early::FitResult pendingFit{};
     std::atomic<bool> fitPending{false};
     std::atomic<double> doneAtMs{0.0};
-    std::array<std::atomic<float>*,16> raw{};
-    std::array<float,6> lastModelValues{};
+    std::array<std::atomic<float>*,15> raw{};
+    std::array<float,5> lastModelValues{};
     std::array<float,8> lastEqValues{};
     bool modelCacheValid=false,eqCacheValid=false;
     void process(juce::AudioBuffer<float>&,bool);

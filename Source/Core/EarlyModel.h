@@ -10,10 +10,9 @@ constexpr int maxTaps = 24;
 struct Parameters {
     float roomSize = 0.45f;
     float roomShape = 0.20f;
-    int count = 6;
+    int faces = 6;
     float width = 1.0f;
     float pattern = 0.35f;
-    int faces = 4;
 };
 
 struct Tap {
@@ -29,7 +28,6 @@ struct TapModel {
     std::uint64_t fingerprint = 0;
 };
 
-int availableTapCount(float roomShape) noexcept;
 TapModel buildModel(const Parameters&) noexcept;
 float modelDistance(const TapModel& target, const TapModel& candidate) noexcept;
 

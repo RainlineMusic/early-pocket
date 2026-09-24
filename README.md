@@ -1,6 +1,6 @@
-# Early Pocket 0.2.0
+# Early Pocket 0.3.0
 
-JUCE audio plug-in with VST3 and AAX Native targets. No standalone application target is defined. The AAX DSP patch from 2019 is not used: it targets JUCE 5.4.1 and Avid TI DSP hardware, while this project targets native AAX with JUCE 8.
+JUCE audio plug-in with VST3 and AAX Native targets. Faces sets the exact number of early reflections (1–16); six is the rectangular-room model. Learn estimates reflection delays from repeated transient waveform similarity and applies a modest EQ match from the difference between the attack and its reflection field. No standalone application target is defined. The AAX DSP patch from 2019 is not used: it targets JUCE 5.4.1 and Avid TI DSP hardware, while this project targets native AAX with JUCE 8.
 
 ## Local macOS build
 

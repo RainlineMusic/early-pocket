@@ -21,12 +21,12 @@ public:
 
 class ModernDial final : public juce::Slider {
 public:
-    ModernDial(PocketLook&,juce::String,juce::String,juce::String,bool integer=false);
+    ModernDial(PocketLook&,juce::String,juce::String,bool integer=false);
     void paint(juce::Graphics&) override;
     float dialProportion() { return float(valueToProportionOfLength(getValue())); }
 private:
     PocketLook& look;
-    juce::String title,subtitle,unit;
+    juce::String title,unit;
     bool integer=false;
 };
 
