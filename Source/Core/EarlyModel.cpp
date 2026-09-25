@@ -23,15 +23,17 @@ std::uint64_t mixHash(std::uint64_t h, int v) noexcept {
 Room makeRoom(const Parameters& p) noexcept {
     const float size = clamp01(p.roomSize);
     const float shape = clamp01(p.roomShape);
-    const float distance = clamp01(p.pattern);
+    // The old mapping made the wet reflections earlier and louder at 100%,
+    // which sounded closer. Preserve that useful sound with the UI reversed.
+    const float distance = 1.0f - clamp01(p.pattern);
     const float scale = 3.0f + 8.5f * std::pow(size, 1.25f);
     Room r;
     r.width  = scale * (0.88f + 0.45f * shape);
     r.depth  = scale * (1.12f + 0.65f * shape);
     r.height = 2.45f + 0.23f * scale * (1.0f + 0.30f * shape);
-    r.listener = { r.width * (0.50f + 0.035f * shape), r.depth * 0.70f, 1.20f };
+    r.listener = { r.width * 0.50f, r.depth * 0.70f, 1.20f };
     const float directDistance = r.depth * (0.08f + 0.38f * distance);
-    r.source = { r.width * (0.50f - 0.060f * shape),
+    r.source = { r.width * 0.50f,
                  std::max(r.depth * 0.12f, r.listener.y - directDistance),
                  1.20f };
     return r;
@@ -50,14 +52,14 @@ Vec3 reflect(Vec3 p, int wall, const Room& r) noexcept {
 }
 
 float wallReflectivity(int wall, float shape) noexcept {
-    constexpr std::array<float, 6> base{0.83f,0.81f,0.78f,0.76f,0.88f,0.72f};
-    constexpr std::array<float, 6> variance{-0.08f,0.05f,-0.03f,0.07f,0.02f,-0.09f};
+    constexpr std::array<float, 6> base{0.82f,0.82f,0.78f,0.76f,0.88f,0.72f};
+    constexpr std::array<float, 6> variance{-0.015f,-0.015f,-0.03f,0.07f,0.02f,-0.09f};
     return std::clamp(base[size_t(wall)] + variance[size_t(wall)] * shape, 0.48f, 0.94f);
 }
 
 float wallHighGain(int wall, float shape) noexcept {
-    constexpr std::array<float, 6> base{0.90f,0.88f,0.84f,0.80f,0.94f,0.75f};
-    constexpr std::array<float, 6> variance{-0.12f,0.05f,-0.08f,0.03f,0.02f,-0.10f};
+    constexpr std::array<float, 6> base{0.89f,0.89f,0.84f,0.80f,0.94f,0.75f};
+    constexpr std::array<float, 6> variance{-0.035f,-0.035f,-0.08f,0.03f,0.02f,-0.10f};
     return std::clamp(base[size_t(wall)] + variance[size_t(wall)] * shape, 0.38f, 1.0f);
 }
 
@@ -78,7 +80,7 @@ Tap makePath(Vec3 image, const Room& room, float coefficient, float highGain,
     const float width = std::clamp(p.width, 0.0f, 2.0f);
     pan = std::tanh(pan * (0.78f + 0.52f * width));
 
-    const float distanceNorm = clamp01(p.pattern);
+    const float distanceNorm = 1.0f - clamp01(p.pattern);
     const float airLoss = std::exp(-0.014f * path * (0.65f + 0.65f * distanceNorm));
     const float spectral = std::clamp(highGain * airLoss, 0.24f, 1.0f);
     const float lateness = clamp01(delayMs / 120.0f);
@@ -112,6 +114,52 @@ void sortByDelay(TapModel& m) noexcept {
             --j;
         }
         m.taps[size_t(j)] = key;
+    }
+}
+
+float hashUnit(std::uint32_t x) noexcept {
+    x ^= x >> 16; x *= 0x7feb352du;
+    x ^= x >> 15; x *= 0x846ca68bu;
+    x ^= x >> 16;
+    return float(x & 0x00ffffffu) / 16777216.0f;
+}
+
+// The first paths define the room. Quieter, polarity-varying paths fill in the
+// later part of the early response without adding a dense reverb tail.
+void addDiffusePaths(TapModel& model, const Parameters& p,
+                     float relativeLevel = 1.0f) noexcept {
+    const int pairs = p.faces <= 1 ? 0 : std::min({24, 2 + 2 * p.faces,
+                                                   (maxTaps - model.count) / 2});
+    if (pairs == 0 || model.count == 0) return;
+    float first = 300.0f, specularEnergy = 0.0f;
+    for (int i = 0; i < model.count; ++i) {
+        first = std::min(first, model.taps[size_t(i)].delayMs);
+        specularEnergy += model.taps[size_t(i)].gain * model.taps[size_t(i)].gain;
+    }
+    const float size = clamp01(p.roomSize);
+    const float duration = 22.0f + 83.0f * size;
+    const float baseGain = (0.56f * relativeLevel)
+                         * std::sqrt(specularEnergy / float(2 * pairs));
+    for (int i = 0; i < pairs; ++i) {
+        const float u = (float(i) + 0.30f + 0.40f * hashUnit(0x1283u + std::uint32_t(i))) / float(pairs);
+        const float centre = std::clamp(first + 1.4f + duration * u * u, 0.75f, 295.0f);
+        const float pan = (0.22f + 0.67f * hashUnit(0x9131u + std::uint32_t(i)))
+                        * std::clamp(p.width, 0.0f, 1.0f);
+        const float sign = hashUnit(0xa137u + std::uint32_t(i)) < 0.5f ? -1.0f : 1.0f;
+        const float gain = sign * baseGain * (1.16f - 0.42f * u);
+        for (int side = 0; side < 2; ++side) {
+            Tap t;
+            t.delayMs = centre + (side == 0 ? -0.19f : 0.19f)
+                        * (0.4f + hashUnit(0x913bu + std::uint32_t(i)));
+            t.gain = gain;
+            t.pan = side == 0 ? -pan : pan;
+            t.pathId = 300 + 2 * i + side;
+            t.lowGain = 0.94f;
+            t.highGain = 0.55f + 0.25f * (1.0f - u);
+            t.diffusionMs = 0.0f; // A single read per quiet path.
+            t.stereoSpread = 0.08f;
+            model.taps[size_t(model.count++)] = t;
+        }
     }
 }
 
@@ -200,8 +248,11 @@ TapModel buildModel(const Parameters& p) noexcept {
     float energy = 0.0f;
     for (int i=0;i<out.count;++i) energy += out.taps[size_t(i)].gain*out.taps[size_t(i)].gain;
     const float scale = energy > 1.35f*1.35f ? 1.35f/std::sqrt(energy) : 1.0f;
-    for (int i=0;i<out.count;++i) out.taps[size_t(i)].gain *= 0.62f * scale;
+    const float sparseReduction = 0.45f + 0.55f * clamp01(p.roomSize);
+    for (int i=0;i<out.count;++i) out.taps[size_t(i)].gain *= 0.62f * scale * sparseReduction;
 
+    // Small rooms need weaker specular paths relative to the diffuse layer.
+    addDiffusePaths(out, p, 1.0f / sparseReduction);
     sortByDelay(out);
     fingerprint(out);
     return out;
@@ -268,6 +319,7 @@ TapModel transformLearnedModel(const TapModel& learned,
             out.taps[size_t(out.count++)]=extra;
         }
     }
+    addDiffusePaths(out, current);
     sortByDelay(out);
     fingerprint(out);
     return out;

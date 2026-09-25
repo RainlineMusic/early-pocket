@@ -5,7 +5,7 @@
 
 namespace early {
 
-constexpr int maxTaps = 24;
+constexpr int maxTaps = 80;
 
 struct Parameters {
     float roomSize = 0.45f;

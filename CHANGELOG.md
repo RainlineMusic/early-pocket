@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.1
+
+- Reduced specular reflection level in small rooms, added a quiet paired diffusion layer and path-specific all-pass dispersion.
+- Corrected Distance direction and removed Room Shape's left/right energy bias.
+- Added an EQ bypass, adjustable mid-band Q, precise Shift-drag and default reset by Alt-click or double-click.
+- Ensured Learn analysis runs once per capture and applies its fitted state together.
+- Added stereo balance, Distance and EQ bypass regression coverage.
+- Let GitHub Actions use an authorized AAX SDK ZIP when supplied through repository secrets.
+
 ## 0.4.0
 
 - Rebuilt the early-reflection renderer as a true-stereo engine.

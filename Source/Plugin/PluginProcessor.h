@@ -64,10 +64,11 @@ private:
     bool learnedActive=false;
 
     std::atomic<bool> fitPending{false};
+    std::atomic<bool> analysisStarted{false}, fitApplying{false};
     std::atomic<double> doneAtMs{0.0};
-    std::array<std::atomic<float>*,15> raw{};
+    std::array<std::atomic<float>*,17> raw{};
     std::array<float,5> lastModelValues{};
-    std::array<float,8> lastEqValues{};
+    std::array<float,9> lastEqValues{};
     bool modelCacheValid=false,eqCacheValid=false;
 
     early::Parameters currentParameters() const noexcept;

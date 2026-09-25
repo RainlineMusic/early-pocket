@@ -15,17 +15,34 @@ void testModel() {
     early::Parameters p;
     p.faces=16; p.roomSize=0.63f; p.roomShape=0.72f; p.width=1.25f; p.pattern=0.48f;
     const auto model=early::buildModel(p);
-    assert(model.count==16);
+    assert(model.count>16 && model.count<=early::maxTaps);
     assert(model.fingerprint!=0);
     float previous=0.0f;
     for(int i=0;i<model.count;++i){
         const auto&t=model.taps[size_t(i)];
         assert(t.delayMs>=0.75f&&t.delayMs<=300.0f);
         assert(t.delayMs>=previous); previous=t.delayMs;
-        assert(t.gain>0.0f&&std::isfinite(t.gain));
+        assert(std::abs(t.gain)>0.0f&&std::isfinite(t.gain));
         assert(t.pan>=-1.0f&&t.pan<=1.0f);
         assert(t.highGain>0.0f&&t.highGain<=1.0f);
         assert(t.diffusionMs>=0.0f);
+    }
+}
+
+void testRoomControls() {
+    for(float size:{0.0f,0.45f,1.0f}) for(float shape:{0.0f,0.5f,1.0f}) {
+        early::Parameters p;p.roomSize=size;p.roomShape=shape;p.faces=6;
+        for(float distance:{0.0f,0.5f,1.0f}) {
+            p.pattern=distance;
+            const auto model=early::buildModel(p);
+            early::Engine engine;engine.prepare(48000.0);engine.setModel(model);
+            double left=0.0,right=0.0;
+            for(int n=0;n<15000;++n){const auto y=engine.process(n==0?1.0f:0.0f,n==0?1.0f:0.0f,1.0f,false);left+=double(y[0])*y[0];right+=double(y[1])*y[1];}
+            assert(std::abs(10.0*std::log10(left/right))<0.5);
+        }
+        p.pattern=0.0f;const auto close=early::buildModel(p);
+        p.pattern=1.0f;const auto distant=early::buildModel(p);
+        assert(close.taps[0].delayMs<distant.taps[0].delayMs);
     }
 }
 
@@ -54,6 +71,23 @@ void testStereoSymmetry() {
     const double scale=std::max({left[0],left[1],right[0],right[1],1.0e-12});
     assert(std::abs(left[0]-right[1])/scale<1.0e-4);
     assert(std::abs(left[1]-right[0])/scale<1.0e-4);
+}
+
+void testEqBypass() {
+    early::TapModel model;model.count=1;model.fingerprint=17;
+    model.taps[0].delayMs=9.0f;model.taps[0].gain=0.8f;
+    model.taps[0].lowGain=1.0f;model.taps[0].highGain=1.0f;
+    early::EqSettings eq;eq.highPassHz=1500.0f;
+    early::Engine on,off;on.prepare(48000.0);off.prepare(48000.0);
+    on.setModel(model);off.setModel(model);on.setEq(eq);off.setEq(eq);
+    double onEnergy=0.0,offEnergy=0.0;
+    for(int n=0;n<24000;++n){
+        const float input=std::sin(2.0f*3.14159265358979323846f*100.0f*float(n)/48000.0f);
+        const auto active=on.process(input,input,1.0f,false,false);
+        const auto bypassed=off.process(input,input,1.0f,false,true);
+        if(n>5000){onEnergy+=double(active[0])*active[0];offEnergy+=double(bypassed[0])*bypassed[0];}
+    }
+    assert(offEnergy>onEnergy*100.0);
 }
 
 void addEcho(const std::vector<float>& dry,std::vector<float>& left,std::vector<float>& right,
@@ -95,7 +129,7 @@ void testLearn() {
     const auto fit=analyzer.fit(summary); assert(fit.valid);
     auto changed=fit.parameters;changed.faces=16;
     const auto transformed=early::transformLearnedModel(summary.taps,changed,fit.parameters,0.5f*(summary.toneDb[4]+summary.toneDb[5]));
-    assert(transformed.count==16);
+    assert(transformed.count>16 && transformed.count<=early::maxTaps);
 }
 
 void testEngineFiniteAcrossRates() {
@@ -115,4 +149,4 @@ void testEngineFiniteAcrossRates() {
 }
 }
 
-int main(){testModel();testStereoSymmetry();testLearn();testEngineFiniteAcrossRates();std::cout<<"EarlyCore tests passed\n";return 0;}
+int main(){testModel();testStereoSymmetry();testRoomControls();testEqBypass();testLearn();testEngineFiniteAcrossRates();std::cout<<"EarlyCore tests passed\n";return 0;}

@@ -20,7 +20,8 @@ public:
     void reset();
     void setModel(const TapModel&);
     void setEq(const EqSettings&);
-    std::array<float, 2> process(float left, float right, float mix, bool bypass) noexcept;
+    std::array<float, 2> process(float left, float right, float mix, bool bypass,
+                                  bool eqBypass = false) noexcept;
     int tailSamples() const noexcept;
 
 private:
@@ -31,7 +32,8 @@ private:
     };
     struct StereoFilter { Biquad l, r; };
 
-    struct TapState { float lowL = 0.0f, lowR = 0.0f; };
+    struct TapState { float lowL = 0.0f, lowR = 0.0f;
+                      float apInL = 0.0f, apInR = 0.0f, apOutL = 0.0f, apOutR = 0.0f; };
     struct DelayRead {
         int whole = 1;
         float cm1 = 0.0f, c0 = 1.0f, c1 = 0.0f, c2 = 0.0f;
@@ -43,6 +45,8 @@ private:
         int clusterCount = 1;
         float gain = 0.0f;
         float lowGain = 1.0f, highGain = 1.0f, lowAlpha = 0.0f;
+        float allpass = 0.0f;
+        bool dispersive = false;
         float gLL = 1.0f, gLR = 0.0f, gRL = 0.0f, gRR = 1.0f;
     };
     struct RenderModel {
@@ -63,6 +67,7 @@ private:
     bool eqInitialised = false;
 
     float bypassMix = 0.0f;
+    float eqBypassMix = 0.0f, eqBypassCoeff = 0.0f;
     float mixSmoothed = 0.0f, mixSmoothingCoeff = 0.0f;
     bool mixInitialised = false;
 

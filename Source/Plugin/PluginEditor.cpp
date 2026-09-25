@@ -65,13 +65,13 @@ double responseMagnitude(const ResponseBiquad& c,double frequency,double sampleR
     return std::abs(numerator/denominator);
 }
 
-float exactEqResponseDb(double sampleRate,float frequency,float hp,float f1,float g1,float f2,float g2,float f3,float g3,float lp){
+float exactEqResponseDb(double sampleRate,float frequency,float hp,float f1,float g1,float f2,float g2,float q,float f3,float g3,float lp){
     const double sr=sampleRate>1000.0?sampleRate:48000.0;
     const double f=juce::jlimit(1.0,sr*.499,double(frequency));
     double magnitude=1.0;
     magnitude*=responseMagnitude(responseCoefficients(sr,hp,.707f,0.f,0),f,sr);
     magnitude*=responseMagnitude(responseCoefficients(sr,f1,.707f,g1,3),f,sr);
-    magnitude*=responseMagnitude(responseCoefficients(sr,f2,.7f,g2,2),f,sr);
+    magnitude*=responseMagnitude(responseCoefficients(sr,f2,q,g2,2),f,sr);
     magnitude*=responseMagnitude(responseCoefficients(sr,f3,.707f,g3,4),f,sr);
     magnitude*=responseMagnitude(responseCoefficients(sr,lp,.707f,0.f,1),f,sr);
     return float(20.0*std::log10(juce::jmax(1.0e-9,magnitude)));
@@ -103,7 +103,7 @@ void ReflectionsGraph::paint(juce::Graphics& g){
     text(g,"EARLY REFLECTIONS",{all.getX()+32,all.getY()+15,300,26},16,juce::Colour(0xfff0f0f0));text(g,"IMPULSE RESPONSE",{all.getRight()-330,all.getY()+15,300,26},14,juce::Colour(0xffa7a7a7),juce::Justification::centredRight);
     g.setColour(juce::Colour(0xff363636));for(int i=0;i<=6;++i){const float x=p.getX()+p.getWidth()*float(i)/6;g.drawVerticalLine(juce::roundToInt(x),p.getY(),p.getBottom());text(g,i==0?"0 ms":juce::String(i*50),{x-24,p.getBottom()+6,48,18},14,juce::Colour(0xffa7a7a7),juce::Justification::centred);}
     for(int i=0;i<=3;++i){const float y=p.getY()+p.getHeight()*float(i)/3;g.drawHorizontalLine(juce::roundToInt(y),p.getX(),p.getRight());text(g,i==0?"0 dB":juce::String(-i*20),{all.getX()+12,y-9,52,18},14,juce::Colour(0xffa7a7a7),juce::Justification::centredRight);}
-    auto draw=[&](const early::TapModel& model,juce::Colour colour,float width,float scale){g.setColour(colour);for(int i=0;i<model.count;++i){const auto& t=model.taps[size_t(i)];const float db=juce::Decibels::gainToDecibels(t.gain*scale,-60.f);if(db<=-60.f)continue;const float x=p.getX()+p.getWidth()*juce::jlimit(0.f,1.f,t.delayMs/300.f);const float y=juce::jmap(juce::jlimit(-60.f,0.f,db),0.f,-60.f,p.getY(),p.getBottom());g.drawLine(x,p.getBottom(),x,y,width);}};
+    auto draw=[&](const early::TapModel& model,juce::Colour colour,float width,float scale){g.setColour(colour);for(int i=0;i<model.count;++i){const auto& t=model.taps[size_t(i)];const float db=juce::Decibels::gainToDecibels(std::abs(t.gain)*scale,-60.f);if(db<=-60.f)continue;const float x=p.getX()+p.getWidth()*juce::jlimit(0.f,1.f,t.delayMs/300.f);const float y=juce::jmap(juce::jlimit(-60.f,0.f,db),0.f,-60.f,p.getY(),p.getBottom());g.drawLine(x,p.getBottom(),x,y,width);}};
     const float m=processor.parameters.getRawParameterValue("mix")->load()*.01f;if(m<.999f){const float db=juce::Decibels::gainToDecibels(1.f-m,-60.f);const float y=juce::jmap(db,0.f,-60.f,p.getY(),p.getBottom());g.setColour(juce::Colour(0xfff0f0f0));g.drawLine(p.getX(),p.getBottom(),p.getX(),y,1.8f);}
     const auto target=processor.getTargetSummary();if(target.taps.count>0)draw(target.taps,juce::Colour(0x668f8f8f),1.f,m);draw(processor.getDisplayedModel(),juce::Colour(0xfff0f0f0),2.f,m);
 }
@@ -139,9 +139,9 @@ void EqualizerGraph::paint(juce::Graphics& g){
     g.setColour(juce::Colour(0xff363636));for(float hz:{20.f,50.f,100.f,200.f,500.f,1000.f,2000.f,5000.f,10000.f,20000.f})g.drawVerticalLine(juce::roundToInt(xForHz(hz)),p.getY(),p.getBottom());for(float db:{-12.f,0.f,12.f})g.drawHorizontalLine(juce::roundToInt(yForDb(db)),p.getX(),p.getRight());
     juce::Path spec;const float specBase=p.getBottom()-4.f*ui,specHeight=p.getHeight()*.34f;for(int i=0;i<int(spectrum.size());++i){const float x=p.getX()+p.getWidth()*float(i)/float(spectrum.size()-1);const float y=specBase-spectrum[size_t(i)]*specHeight;if(i==0)spec.startNewSubPath(x,y);else spec.lineTo(x,y);}juce::Path fill=spec;fill.lineTo(p.getRight(),specBase);fill.lineTo(p.getX(),specBase);fill.closeSubPath();g.setColour(juce::Colour(0x1caaaaaa));g.fillPath(fill);g.setColour(juce::Colour(0x668f8f8f));g.strokePath(spec,juce::PathStrokeType(juce::jmax(.8f,ui)));
     const float hp=processor.parameters.getRawParameterValue("hp")->load(),lp=processor.parameters.getRawParameterValue("lp")->load();
-    const float f1=processor.parameters.getRawParameterValue("eq1Freq")->load(),f2=processor.parameters.getRawParameterValue("eq2Freq")->load(),f3=processor.parameters.getRawParameterValue("eq3Freq")->load();const float a1=processor.parameters.getRawParameterValue("eq1Gain")->load(),a2=processor.parameters.getRawParameterValue("eq2Gain")->load(),a3=processor.parameters.getRawParameterValue("eq3Gain")->load();
+    const float f1=processor.parameters.getRawParameterValue("eq1Freq")->load(),f2=processor.parameters.getRawParameterValue("eq2Freq")->load(),f3=processor.parameters.getRawParameterValue("eq3Freq")->load();const float a1=processor.parameters.getRawParameterValue("eq1Gain")->load(),a2=processor.parameters.getRawParameterValue("eq2Gain")->load(),a3=processor.parameters.getRawParameterValue("eq3Gain")->load();const float q=processor.parameters.getRawParameterValue("eq2Q")->load();const bool eqOff=processor.parameters.getRawParameterValue("eqBypass")->load()>.5f;
     const double sr=processor.getSampleRate()>1000.0?processor.getSampleRate():48000.0;
-    juce::Path curve;for(int x=0;x<=int(p.getWidth());++x){const float f=20.f*std::pow(1000.f,float(x)/p.getWidth());const float db=exactEqResponseDb(sr,f,hp,f1,a1,f2,a2,f3,a3,lp);const float y=yForDb(db);if(x==0)curve.startNewSubPath(p.getX(),y);else curve.lineTo(p.getX()+float(x),y);}juce::Path area=curve;area.lineTo(p.getRight(),yForDb(0));area.lineTo(p.getX(),yForDb(0));area.closeSubPath();g.setColour(juce::Colour(0x148f8f8f));g.fillPath(area);g.setColour(juce::Colour(0xffe8e8e8));g.strokePath(curve,juce::PathStrokeType(juce::jmax(1.2f,1.8f*ui)));
+    juce::Path curve;for(int x=0;x<=int(p.getWidth());++x){const float f=20.f*std::pow(1000.f,float(x)/p.getWidth());const float db=eqOff?0.f:exactEqResponseDb(sr,f,hp,f1,a1,f2,a2,q,f3,a3,lp);const float y=yForDb(db);if(x==0)curve.startNewSubPath(p.getX(),y);else curve.lineTo(p.getX()+float(x),y);}juce::Path area=curve;area.lineTo(p.getRight(),yForDb(0));area.lineTo(p.getX(),yForDb(0));area.closeSubPath();g.setColour(juce::Colour(0x148f8f8f));g.fillPath(area);g.setColour(eqOff?juce::Colour(0xff777777):juce::Colour(0xffe8e8e8));g.strokePath(curve,juce::PathStrokeType(juce::jmax(1.2f,1.8f*ui)));
     const float frequencies[3]{f1,f2,f3},gains[3]{a1,a2,a3};const float node=juce::jmax(6.f,7.f*ui);for(int i=0;i<3;++i){const float x=xForHz(frequencies[i]),y=yForDb(gains[i]);g.setColour(juce::Colour(0xff111111));g.fillEllipse(x-node,y-node,node*2,node*2);g.setColour(active==i?juce::Colours::white:juce::Colour(0xfff0f0f0));g.drawEllipse(x-node,y-node,node*2,node*2,juce::jmax(1.2f,1.6f*ui));}
     for(auto [f,label]:{std::pair<float,const char*>{20,"20"},{50,"50"},{100,"100"},{200,"200"},{500,"500"},{1000,"1k"},{2000,"2k"},{5000,"5k"},{10000,"10k"},{20000,"20k"}})text(g,label,{xForHz(f)-22.f*ui,p.getBottom()+5.f*ui,44.f*ui,18.f*ui},juce::jmax(10.f,13.f*ui),juce::Colour(0xffa7a7a7),juce::Justification::centred);
     for(float db:{12.f,0.f,-12.f})text(g,juce::String(db>0?"+":"")+juce::String(juce::roundToInt(db)),{p.getX()-48.f*ui,yForDb(db)-9.f*ui,42.f*ui,18.f*ui},juce::jmax(10.f,12.f*ui),juce::Colour(0xffa7a7a7),juce::Justification::centredRight);
@@ -157,24 +157,31 @@ void EqualizerGraph::mouseDown(const juce::MouseEvent& e){
     if(best>hitRadius){active=-1;return;}
     activeFrequencyParameter=processor.parameters.getParameter(ids[active]);
     activeGainParameter=processor.parameters.getParameter(gains[active]);
+    if(e.mods.isAltDown()||e.getNumberOfClicks()>1){
+        for(auto* p:{activeFrequencyParameter,activeGainParameter})if(p){p->beginChangeGesture();p->setValueNotifyingHost(p->getDefaultValue());p->endChangeGesture();}
+        activeFrequencyParameter=nullptr;activeGainParameter=nullptr;active=-1;repaint();return;
+    }
+    dragStartPosition=e.position;
+    dragStartFrequency=processor.parameters.getRawParameterValue(ids[active])->load();
+    dragStartGain=processor.parameters.getRawParameterValue(gains[active])->load();
     if(activeFrequencyParameter)activeFrequencyParameter->beginChangeGesture();
     if(activeGainParameter)activeGainParameter->beginChangeGesture();
     repaint();
 }
-void EqualizerGraph::mouseDrag(const juce::MouseEvent& e){moveNode(e.position);}
+void EqualizerGraph::mouseDrag(const juce::MouseEvent& e){moveNode(e.position,e.mods.isShiftDown());}
 void EqualizerGraph::mouseUp(const juce::MouseEvent&){
     if(activeFrequencyParameter)activeFrequencyParameter->endChangeGesture();
     if(activeGainParameter)activeGainParameter->endChangeGesture();
     activeFrequencyParameter=nullptr;activeGainParameter=nullptr;active=-1;repaint();
 }
-void EqualizerGraph::moveNode(juce::Point<float> pos){
+void EqualizerGraph::moveNode(juce::Point<float> pos,bool fine){
     if(active<0||!activeFrequencyParameter||!activeGainParameter)return;
     const auto p=plot();
     const float x=juce::jlimit(0.f,1.f,(pos.x-p.getX())/p.getWidth());
-    const float requestedFrequency=20.f*std::pow(1000.f,x);
+    const float requestedFrequency=fine?dragStartFrequency*std::pow(1000.f,(pos.x-dragStartPosition.x)/p.getWidth()*.20f):20.f*std::pow(1000.f,x);
     const float minFrequency=activeFrequencyParameter->convertFrom0to1(0.f),maxFrequency=activeFrequencyParameter->convertFrom0to1(1.f);
     const float frequency=juce::jlimit(juce::jmin(minFrequency,maxFrequency),juce::jmax(minFrequency,maxFrequency),requestedFrequency);
-    const float requestedDb=juce::jmap(juce::jlimit(p.getY(),p.getBottom(),pos.y),p.getY(),p.getBottom(),12.f,-12.f);
+    const float requestedDb=fine?dragStartGain-(pos.y-dragStartPosition.y)/p.getHeight()*24.f*.20f:juce::jmap(juce::jlimit(p.getY(),p.getBottom(),pos.y),p.getY(),p.getBottom(),12.f,-12.f);
     const float minGain=activeGainParameter->convertFrom0to1(0.f),maxGain=activeGainParameter->convertFrom0to1(1.f);
     const float db=juce::jlimit(juce::jmin(minGain,maxGain),juce::jmax(minGain,maxGain),requestedDb);
     activeFrequencyParameter->setValueNotifyingHost(activeFrequencyParameter->convertTo0to1(frequency));
@@ -195,8 +202,36 @@ void EarlyPocketAudioProcessorEditor::paint(juce::Graphics& g){const float s=flo
 void EarlyPocketAudioProcessorEditor::setExpanded(bool e){expanded=e;plugin.editorExpanded=e;eq.setVisible(e);const float h=e?expandedHeight:collapsedHeight;getConstrainer()->setSizeLimits(minimumEditorWidth,juce::roundToInt(float(minimumEditorWidth)*h/designWidth),maximumEditorWidth,juce::roundToInt(float(maximumEditorWidth)*h/designWidth));getConstrainer()->setFixedAspectRatio(designWidth/h);setSize(getWidth(),juce::roundToInt(float(getWidth())*h/designWidth));resized();repaint();}
 void EarlyPocketAudioProcessorEditor::showSettings(){juce::PopupMenu root,themes;themes.addItem(1,"Solid Dark",true,true);root.addSubMenu("Темы",themes);auto area=scaled(1465,16,60,53);area.setPosition(localPointToGlobal(area.getPosition()));root.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this).withTargetScreenArea(area),[](int){});}
 void EarlyPocketAudioProcessorEditor::captureBlurSnapshot(){if(capturingBlur||blurArea.isEmpty())return;capturingBlur=true;auto source=createComponentSnapshot(blurArea,true,1.f);capturingBlur=false;if(!source.isValid())return;const int w=juce::jmax(16,source.getWidth()/6),h=juce::jmax(16,source.getHeight()/6);juce::Image small(juce::Image::ARGB,w,h,true);{juce::Graphics sg(small);sg.setImageResamplingQuality(juce::Graphics::highResamplingQuality);sg.drawImage(source,juce::Rectangle<float>(0,0,float(w),float(h)),juce::RectanglePlacement::stretchToFit);}juce::Image soft(juce::Image::ARGB,w,h,true);juce::ImageConvolutionKernel kernel(9);kernel.createGaussianBlur(2.2f);kernel.applyToImage(soft,small,small.getBounds());blurredSnapshot=soft;}
-void EarlyPocketAudioProcessorEditor::paintOverChildren(juce::Graphics& g){const char* ids[]{"roomSize","faces","roomShape","width","distance","mix"};const char* titles[]{"Room Size","Faces","Room Shape","Width","Distance","Mix"};const float positions[]{76.f,336.f,596.f,856.f,1116.f,1376.f};for(int i=0;i<6;++i){const float value=plugin.parameters.getRawParameterValue(ids[i])->load();const auto* parameter=plugin.parameters.getParameter(ids[i]);const float proportion=parameter!=nullptr?parameter->convertTo0to1(value):0.f;const bool integer=i==1;drawDialBody(g,scaled(positions[i],449,200,220).toFloat(),look,titles[i],integer?"":"%",value,proportion,integer);}const char* learnText="Learn";switch(plugin.getLearnState()){case EarlyPocketAudioProcessor::LearnState::capturing:case EarlyPocketAudioProcessor::LearnState::analyzing:learnText="Listening";break;case EarlyPocketAudioProcessor::LearnState::ready:learnText="Done";break;case EarlyPocketAudioProcessor::LearnState::insufficient:case EarlyPocketAudioProcessor::LearnState::error:learnText="Try again";break;default:break;}drawControlButton(g,scaled(1333,16,112,53).toFloat(),"",juce::String(learnText),false,look);drawControlButton(g,scaled(1465,16,60,53).toFloat(),"settings","",false,look);drawControlButton(g,scaled(1545,16,60,53).toFloat(),"power","",bypassTarget,look);drawControlButton(g,scaled(56,691,52,46).toFloat(),"panel","",expanded,look);if(capturingBlur)return;if(bypassTarget&&blurredSnapshot.isValid()){g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);g.drawImage(blurredSnapshot,blurArea.toFloat(),juce::RectanglePlacement::stretchToFit);g.setColour(juce::Colours::black.withAlpha(.18f));g.fillRoundedRectangle(blurArea.toFloat(),12.f);auto centre=blurArea.toFloat().translated(0,-float(blurArea.getHeight())*.05f);g.setColour(juce::Colours::black.withAlpha(.55f));g.setFont(uiFont(juce::jmax(34.f,float(getWidth())/18.f)));g.drawText("BYPASSED",centre.translated(0,2),juce::Justification::centred);text(g,"BYPASSED",centre,juce::jmax(34.f,float(getWidth())/18.f),juce::Colours::white,juce::Justification::centred);}}
-void EarlyPocketAudioProcessorEditor::mouseDown(const juce::MouseEvent& e){const char* ids[]{"roomSize","faces","roomShape","width","distance","mix"};const float positions[]{76.f,336.f,596.f,856.f,1116.f,1376.f};for(int i=0;i<6;++i)if(scaled(positions[i],449,200,220).toFloat().contains(e.position)){activeDial=i;dragStartY=e.position.y;draggedParameter=plugin.parameters.getParameter(ids[i]);dragStartValue=plugin.parameters.getRawParameterValue(ids[i])->load();if(draggedParameter)draggedParameter->beginChangeGesture();return;}if(scaled(1333,16,112,53).toFloat().contains(e.position)){plugin.toggleLearn();return;}if(scaled(1465,16,60,53).toFloat().contains(e.position)){showSettings();return;}if(scaled(1545,16,60,53).toFloat().contains(e.position)){if(auto* p=plugin.parameters.getParameter("bypass")){p->beginChangeGesture();const auto* raw=plugin.parameters.getRawParameterValue("bypass");p->setValueNotifyingHost(p->convertTo0to1(raw->load()>.5f?0.f:1.f));p->endChangeGesture();}return;}if(scaled(56,691,52,46).toFloat().contains(e.position))setExpanded(!expanded);}
+void EarlyPocketAudioProcessorEditor::paintOverChildren(juce::Graphics& g){const char* ids[]{"roomSize","faces","roomShape","width","distance","mix"};const char* titles[]{"Room Size","Faces","Room Shape","Width","Distance","Mix"};const float positions[]{76.f,336.f,596.f,856.f,1116.f,1376.f};for(int i=0;i<6;++i){const float value=plugin.parameters.getRawParameterValue(ids[i])->load();const auto* parameter=plugin.parameters.getParameter(ids[i]);const float proportion=parameter!=nullptr?parameter->convertTo0to1(value):0.f;const bool integer=i==1;drawDialBody(g,scaled(positions[i],449,200,220).toFloat(),look,titles[i],integer?"":"%",value,proportion,integer);}const char* learnText="Learn";switch(plugin.getLearnState()){case EarlyPocketAudioProcessor::LearnState::capturing:case EarlyPocketAudioProcessor::LearnState::analyzing:learnText="Listening";break;case EarlyPocketAudioProcessor::LearnState::ready:learnText="Done";break;case EarlyPocketAudioProcessor::LearnState::insufficient:case EarlyPocketAudioProcessor::LearnState::error:learnText="Try again";break;default:break;}drawControlButton(g,scaled(1333,16,112,53).toFloat(),"",juce::String(learnText),false,look);drawControlButton(g,scaled(1465,16,60,53).toFloat(),"settings","",false,look);drawControlButton(g,scaled(1545,16,60,53).toFloat(),"power","",bypassTarget,look);drawControlButton(g,scaled(56,691,52,46).toFloat(),"panel","",expanded,look);const float midQ=plugin.parameters.getRawParameterValue("eq2Q")->load();const bool eqOff=plugin.parameters.getRawParameterValue("eqBypass")->load()>.5f;drawControlButton(g,scaled(1230,691,125,46).toFloat(),"","Q  "+juce::String(midQ,2),false,look);drawControlButton(g,scaled(1380,691,180,46).toFloat(),"",eqOff?"EQ OFF":"EQ ON",!eqOff,look);if(capturingBlur)return;if(bypassTarget&&blurredSnapshot.isValid()){g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);g.drawImage(blurredSnapshot,blurArea.toFloat(),juce::RectanglePlacement::stretchToFit);g.setColour(juce::Colours::black.withAlpha(.18f));g.fillRoundedRectangle(blurArea.toFloat(),12.f);auto centre=blurArea.toFloat().translated(0,-float(blurArea.getHeight())*.05f);g.setColour(juce::Colours::black.withAlpha(.55f));g.setFont(uiFont(juce::jmax(34.f,float(getWidth())/18.f)));g.drawText("BYPASSED",centre.translated(0,2),juce::Justification::centred);text(g,"BYPASSED",centre,juce::jmax(34.f,float(getWidth())/18.f),juce::Colours::white,juce::Justification::centred);}}
+void EarlyPocketAudioProcessorEditor::mouseDown(const juce::MouseEvent& e){
+    const char* ids[]{"roomSize","faces","roomShape","width","distance","mix"};
+    const float positions[]{76.f,336.f,596.f,856.f,1116.f,1376.f};
+    for(int i=0;i<6;++i)if(scaled(positions[i],449,200,220).toFloat().contains(e.position)){
+        auto* p=plugin.parameters.getParameter(ids[i]);
+        if(p&&(e.mods.isAltDown()||e.getNumberOfClicks()>1)){
+            p->beginChangeGesture();p->setValueNotifyingHost(p->getDefaultValue());p->endChangeGesture();repaint();return;
+        }
+        activeDial=i;dragStartY=e.position.y;draggedParameter=p;
+        dragStartValue=plugin.parameters.getRawParameterValue(ids[i])->load();
+        if(p)p->beginChangeGesture();return;
+    }
+    if(scaled(1230,691,125,46).toFloat().contains(e.position)){
+        auto* p=plugin.parameters.getParameter("eq2Q");
+        if(p&&(e.mods.isAltDown()||e.getNumberOfClicks()>1)){
+            p->beginChangeGesture();p->setValueNotifyingHost(p->getDefaultValue());p->endChangeGesture();repaint();return;
+        }
+        activeDial=6;dragStartY=e.position.y;draggedParameter=p;
+        dragStartValue=plugin.parameters.getRawParameterValue("eq2Q")->load();
+        if(p)p->beginChangeGesture();return;
+    }
+    auto toggle=[&](const char* id){if(auto* p=plugin.parameters.getParameter(id)){
+        p->beginChangeGesture();p->setValueNotifyingHost(p->convertTo0to1(plugin.parameters.getRawParameterValue(id)->load()>.5f?0.f:1.f));p->endChangeGesture();repaint();}};
+    if(scaled(1380,691,180,46).toFloat().contains(e.position)){toggle("eqBypass");return;}
+    if(scaled(1333,16,112,53).toFloat().contains(e.position)){plugin.toggleLearn();return;}
+    if(scaled(1465,16,60,53).toFloat().contains(e.position)){showSettings();return;}
+    if(scaled(1545,16,60,53).toFloat().contains(e.position)){toggle("bypass");return;}
+    if(scaled(56,691,52,46).toFloat().contains(e.position))setExpanded(!expanded);
+}
 void EarlyPocketAudioProcessorEditor::mouseDrag(const juce::MouseEvent& e){if(activeDial<0||!draggedParameter)return;const float minimum=draggedParameter->convertFrom0to1(0.f),maximum=draggedParameter->convertFrom0to1(1.f),range=maximum-minimum;float sensitivity=range/juce::jmax(1.f,float(getHeight())*.32f);if(e.mods.isShiftDown())sensitivity*=.2f;const float value=juce::jlimit(minimum,maximum,dragStartValue+(dragStartY-e.position.y)*sensitivity);draggedParameter->setValueNotifyingHost(draggedParameter->convertTo0to1(value));repaint();}
 void EarlyPocketAudioProcessorEditor::mouseUp(const juce::MouseEvent&){if(draggedParameter)draggedParameter->endChangeGesture();draggedParameter=nullptr;activeDial=-1;}
 void EarlyPocketAudioProcessorEditor::timerCallback(){const int s=int(plugin.getLearnState());if(s!=learnState){learnState=s;repaint();}const bool nextBypass=plugin.parameters.getRawParameterValue("bypass")->load()>.5f||plugin.displayBypass.load(std::memory_order_relaxed);if(nextBypass!=bypassTarget){bypassTarget=nextBypass;if(bypassTarget)captureBlurSnapshot();else blurredSnapshot={};repaint();}eq.refreshSpectrum();if(expanded)eq.repaint();}

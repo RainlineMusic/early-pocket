@@ -1,6 +1,8 @@
-# Early Pocket 0.4.0
+# Early Pocket 0.4.1
 
 Early Pocket is a dedicated early-reflections processor built with JUCE. Version 0.4.0 replaces the original sparse multi-tap model with a true-stereo, geometry-informed early-reflection engine and upgrades Learn so measured reflections can become the actual base model instead of being discarded after fitting.
+
+Version 0.4.1 adds quieter, denser secondary reflections and path-specific phase dispersion to reduce short-room coloration. Distance now runs from close (0%) to distant (100%), and Room Shape keeps a centred source and listener with matched left/right wall response. Existing version-2 procedural presets migrate their Distance value when loaded. EQ has a bypass and adjustable mid-band Q. Double-click or Alt-click a main dial, Q control, or EQ node to reset it; Shift-drag an EQ node for fine adjustment. Learn applies a completed fit once with a single model transition.
 
 ## DSP changes in 0.4.0
 

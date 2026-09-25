@@ -59,10 +59,12 @@ private:
     int active=-1;
     juce::RangedAudioParameter* activeFrequencyParameter=nullptr;
     juce::RangedAudioParameter* activeGainParameter=nullptr;
+    juce::Point<float> dragStartPosition{};
+    float dragStartFrequency=0.0f,dragStartGain=0.0f;
     juce::Rectangle<float> plot() const;
     float xForHz(float) const;
     float yForDb(float) const;
-    void moveNode(juce::Point<float>);
+    void moveNode(juce::Point<float>,bool fine);
 };
 
 class EarlyPocketAudioProcessorEditor final : public juce::AudioProcessorEditor,private juce::Timer {

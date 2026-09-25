@@ -11,6 +11,7 @@ constexpr std::array<float, 7> clusterPosition{-1.0f, -0.56f, -0.22f, 0.0f, 0.29
 constexpr std::array<float, 7> clusterWeight{0.12f, 0.22f, 0.38f, 1.0f, 0.34f, 0.20f, 0.10f};
 
 int clusterSize(float diffusionMs) noexcept {
+    if (diffusionMs <= 0.0f) return 1;
     if (diffusionMs < 0.18f) return 3;
     if (diffusionMs < 0.75f) return 5;
     return 7;
@@ -35,6 +36,7 @@ void Engine::prepare(double sr, int maximumDelayMs) {
     fadeLength = std::max(1, int(std::lround(rate * 0.025)));
     eqFadeLength = std::max(1, int(std::lround(rate * 0.010)));
     mixSmoothingCoeff = float(std::exp(-1.0 / (rate * 0.008)));
+    eqBypassCoeff = float(std::exp(-1.0 / (rate * 0.010)));
     reset();
     setEq({});
 }
@@ -45,6 +47,7 @@ void Engine::reset() {
     fadeRemaining = 0;
     eqFadeRemaining = 0;
     bypassMix = 0.0f;
+    eqBypassMix = 0.0f;
     mixSmoothed = 0.0f;
     mixInitialised = false;
     currentState = {};
@@ -95,6 +98,14 @@ Engine::RenderModel Engine::makeRenderModel(const TapModel& model) const noexcep
         tap.lowGain = std::clamp(source.lowGain, 0.0f, 1.5f);
         tap.highGain = std::clamp(source.highGain, 0.0f, 1.5f);
         tap.lowAlpha = 1.0f - std::exp(-2.0f*3.14159265358979323846f*1850.0f/float(rate));
+        tap.dispersive = source.pathId < 300;
+        if (tap.dispersive) {
+            const unsigned id = unsigned(source.pathId + 47);
+            const unsigned hash = (id * 1664525u + 1013904223u) ^ (id * 2246822519u);
+            const float hz = 480.0f + float(hash % 5500u);
+            const float tangent = std::tan(3.14159265358979323846f * hz / float(rate));
+            tap.allpass = (tangent - 1.0f) / (tangent + 1.0f);
+        }
 
         const float spread = std::clamp(source.stereoSpread, 0.0f, 0.48f);
         const float panL = std::clamp(source.pan - spread, -1.0f, 1.0f);
@@ -165,8 +176,15 @@ std::array<float,2> Engine::render(const RenderModel& m,
         auto& state = states[size_t(i)];
         state.lowL += t.lowAlpha * (xL - state.lowL);
         state.lowR += t.lowAlpha * (xR - state.lowR);
-        const float colouredL = state.lowL*t.lowGain + (xL-state.lowL)*t.highGain;
-        const float colouredR = state.lowR*t.lowGain + (xR-state.lowR)*t.highGain;
+        float colouredL = state.lowL*t.lowGain + (xL-state.lowL)*t.highGain;
+        float colouredR = state.lowR*t.lowGain + (xR-state.lowR)*t.highGain;
+        if (t.dispersive) {
+            const float outL = t.allpass*colouredL + state.apInL - t.allpass*state.apOutL;
+            const float outR = t.allpass*colouredR + state.apInR - t.allpass*state.apOutR;
+            state.apInL = colouredL; state.apInR = colouredR;
+            state.apOutL = outL; state.apOutR = outR;
+            colouredL = outL; colouredR = outR;
+        }
 
         wet[0] += t.gain * (colouredL*t.gLL + colouredR*t.gRL);
         wet[1] += t.gain * (colouredL*t.gLR + colouredR*t.gRR);
@@ -185,7 +203,8 @@ std::array<float,2> Engine::applyFilters(std::array<StereoFilter,5>& bank,
     return x;
 }
 
-std::array<float,2> Engine::process(float l,float r,float mix,bool bypass) noexcept {
+std::array<float,2> Engine::process(float l,float r,float mix,bool bypass,
+                                    bool eqBypass) noexcept {
     if (delay.empty()) return {l,r};
     delay[size_t(write)] = {l,r};
 
@@ -206,6 +225,10 @@ std::array<float,2> Engine::process(float l,float r,float mix,bool bypass) noexc
         filtered[1] = old[1] + x*(filtered[1]-old[1]);
         --eqFadeRemaining;
     }
+    const float eqTarget = eqBypass ? 1.0f : 0.0f;
+    eqBypassMix = eqTarget + eqBypassCoeff * (eqBypassMix - eqTarget);
+    filtered[0] += eqBypassMix * (wet[0] - filtered[0]);
+    filtered[1] += eqBypassMix * (wet[1] - filtered[1]);
 
     write = (write + 1) % int(delay.size());
 

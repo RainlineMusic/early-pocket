@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(EarlyPocket VERSION 0.4.0 LANGUAGES C CXX)
+project(EarlyPocket VERSION 0.4.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -10,6 +10,10 @@ if(NOT DEFINED JUCE_DIR OR NOT EXISTS "${JUCE_DIR}/CMakeLists.txt")
 endif()
 
 add_subdirectory("${JUCE_DIR}" JUCE)
+
+if(DEFINED AAX_SDK_PATH AND EXISTS "${AAX_SDK_PATH}/Interfaces/AAX.h")
+    juce_set_aax_sdk_path("${AAX_SDK_PATH}")
+endif()
 
 add_library(EarlyCore STATIC
     Source/Core/EarlyModel.cpp
