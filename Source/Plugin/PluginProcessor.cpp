@@ -14,7 +14,7 @@ EarlyPocketAudioProcessor::EarlyPocketAudioProcessor()
                                   .withInput("Sidechain",juce::AudioChannelSet::stereo(),false)
                                   .withOutput("Output",juce::AudioChannelSet::stereo(),true)),
   parameters(*this,nullptr,"EARLY_STATE",layout()),learnThread(*this){
- const char* ids[]={"roomSize","faces","roomShape","width","distance","mix","hp","eq1Freq","eq1Gain","eq2Freq","eq2Gain","eq3Freq","eq3Gain","lp","bypass","eqBypass","eq2Q"};
+ const char* ids[]={"roomSize","faces","roomShape","width","distance","mix","hp","eq1Freq","eq1Gain","eq2Freq","eq2Gain","eq3Freq","eq3Gain","lp","bypass"};
  for(size_t i=0;i<raw.size();++i)raw[i]=parameters.getRawParameterValue(ids[i]);
  startTimerHz(20);
 }
@@ -37,8 +37,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout EarlyPocketAudioProcessor::l
  p.push_back(std::make_unique<juce::AudioParameterFloat>("eq3Gain","EQ 3 Gain",-12.f,12.f,0.f));
  p.push_back(std::make_unique<juce::AudioParameterFloat>("lp","ER Low-pass",logRange(1000,20000),20000));
  p.push_back(std::make_unique<juce::AudioParameterBool>("bypass","Bypass",false));
- p.push_back(std::make_unique<juce::AudioParameterBool>("eqBypass","EQ Bypass",false));
- p.push_back(std::make_unique<juce::AudioParameterFloat>("eq2Q","EQ Mid Q",0.3f,6.0f,0.7f));
  return {p.begin(),p.end()};
 }
 
@@ -54,7 +52,6 @@ void EarlyPocketAudioProcessor::prepareToPlay(double sr,int){
     captureDryL.assign(size_t(captureLimit),0.0f); captureDryR.assign(size_t(captureLimit),0.0f);
     captureWrite=0; captureHasReference=false; captureStereo=false; captureDryStereo=false; captureStopRequested=false;
     analysisStarted=false; fitPending=false; fitApplying=false;
-    audioLearnedGeneration=std::numeric_limits<std::uint64_t>::max();
     modelCacheValid=false; eqCacheValid=false; updateModelAndEq(); setLatencySamples(0);
 }
 void EarlyPocketAudioProcessor::reset(){engine.reset();captureWrite=0;captureStopRequested=false;}
@@ -70,33 +67,14 @@ void EarlyPocketAudioProcessor::processBlockBypassed(juce::AudioBuffer<float>& b
 
 void EarlyPocketAudioProcessor::updateModelAndEq(){
     if (fitApplying.load(std::memory_order_acquire)) return;
-    std::uint64_t generation=0;
-    bool useLearned=false;
-    {
-        const juce::SpinLock::ScopedLockType lock(dataLock);
-        generation=learnedGeneration; useLearned=learnedActive;
-    }
-    if(generation!=audioLearnedGeneration){
-        const juce::SpinLock::ScopedLockType lock(dataLock);
-        audioLearnedTaps=target.taps;
-        audioLearnedReference=learnedReference;
-        audioLearnedHighToneDb=0.5f*(target.toneDb[4]+target.toneDb[5]);
-        useLearned=learnedActive;
-        audioLearnedGeneration=learnedGeneration;
-        modelCacheValid=false;
-    }
-
     const std::array<float,5> modelValues{raw[0]->load(),raw[2]->load(),raw[1]->load(),raw[3]->load(),raw[4]->load()};
     if(!modelCacheValid||modelValues!=lastModelValues){
-        const auto p=currentParameters();
-        engine.setModel(useLearned&&audioLearnedTaps.count>0
-            ? early::transformLearnedModel(audioLearnedTaps,p,audioLearnedReference,audioLearnedHighToneDb)
-            : early::buildModel(p));
+        engine.setModel(early::buildModel(currentParameters()));
         lastModelValues=modelValues;modelCacheValid=true;
     }
-    const std::array<float,9> eqValues{raw[6]->load(),raw[7]->load(),raw[8]->load(),raw[9]->load(),raw[10]->load(),raw[11]->load(),raw[12]->load(),raw[13]->load(),raw[16]->load()};
+    const std::array<float,8> eqValues{raw[6]->load(),raw[7]->load(),raw[8]->load(),raw[9]->load(),raw[10]->load(),raw[11]->load(),raw[12]->load(),raw[13]->load()};
     if(!eqCacheValid||eqValues!=lastEqValues){
-        early::EqSettings e;e.highPassHz=eqValues[0];e.frequency={eqValues[1],eqValues[3],eqValues[5]};e.gainDb={eqValues[2],eqValues[4],eqValues[6]};e.lowPassHz=eqValues[7];e.q[1]=eqValues[8];
+        early::EqSettings e;e.highPassHz=eqValues[0];e.frequency={eqValues[1],eqValues[3],eqValues[5]};e.gainDb={eqValues[2],eqValues[4],eqValues[6]};e.lowPassHz=eqValues[7];
         engine.setEq(e);lastEqValues=eqValues;eqCacheValid=true;
     }
 }
@@ -123,7 +101,7 @@ void EarlyPocketAudioProcessor::process(juce::AudioBuffer<float>& b,bool hostByp
             ++pos;
         }
         auto y=engine.process(sourceL,sourceR,raw[5]->load()*0.01f,
-                              hostBypass||raw[14]->load()>0.5f,raw[15]->load()>0.5f);
+                              hostBypass||raw[14]->load()>0.5f);
         if(outR){outL[n]=y[0];outR[n]=y[1];}else outL[n]=0.5f*(y[0]+y[1]);
     }
     spectrumWrite.store(spectrumPos,std::memory_order_release);
@@ -174,19 +152,14 @@ void EarlyPocketAudioProcessor::applyFit(){
     for(size_t i=0;i<ids.size();++i)if(auto* p=parameters.getParameter(ids[i])){p->beginChangeGesture();p->setValueNotifyingHost(p->convertTo0to1(values[i]));p->endChangeGesture();}
     {
         const juce::SpinLock::ScopedLockType lock(dataLock);
-        target=t;learnedReference=fit.parameters;learnedActive=true;++learnedGeneration;
+        target=t;
     }
     doneAtMs=juce::Time::getMillisecondCounterHiRes();learnState=LearnState::ready;
     fitApplying.store(false,std::memory_order_release);
 }
 
 early::TapModel EarlyPocketAudioProcessor::getDisplayedModel()const{
-    early::TargetSummary localTarget;early::Parameters reference;bool active=false;
-    {const juce::SpinLock::ScopedLockType lock(dataLock);localTarget=target;reference=learnedReference;active=learnedActive;}
-    const auto p=currentParameters();
-    return active&&localTarget.taps.count>0
-        ? early::transformLearnedModel(localTarget.taps,p,reference,0.5f*(localTarget.toneDb[4]+localTarget.toneDb[5]))
-        : early::buildModel(p);
+    return early::buildModel(currentParameters());
 }
 early::TargetSummary EarlyPocketAudioProcessor::getTargetSummary()const{const juce::SpinLock::ScopedLockType lock(dataLock);return target;}
 juce::String EarlyPocketAudioProcessor::getFitQuality()const{const auto t=getTargetSummary();if(t.taps.count==0)return{};return t.confidence==early::Confidence::good?"GOOD":(t.confidence==early::Confidence::fair?"FAIR":"WEAK");}
@@ -194,20 +167,19 @@ void EarlyPocketAudioProcessor::copySpectrumInput(float* dst,int count)const noe
 double EarlyPocketAudioProcessor::getTailLengthSeconds()const{const auto m=getDisplayedModel();float ms=0.0f;for(int i=0;i<m.count;++i){const auto&t=m.taps[size_t(i)];ms=std::max(ms,t.delayMs+t.diffusionMs+t.decorrelationMs);}return (double(ms)+60.0)*0.001;}
 
 void EarlyPocketAudioProcessor::getStateInformation(juce::MemoryBlock& d){
-    auto s=parameters.copyState();s.setProperty("profileVersion",3,nullptr);s.setProperty("uiWidth",editorWidth.load(),nullptr);s.setProperty("uiExpanded",editorExpanded.load(),nullptr);
-    early::TargetSummary t;early::Parameters reference;bool active=false;
-    {const juce::SpinLock::ScopedLockType lock(dataLock);t=target;reference=learnedReference;active=learnedActive;}
-    s.setProperty("learnedActive",active,nullptr);s.setProperty("targetCount",t.taps.count,nullptr);s.setProperty("targetConfidence",int(t.confidence),nullptr);s.setProperty("targetOnsets",t.onsetCount,nullptr);
+    auto s=parameters.copyState();s.setProperty("profileVersion",4,nullptr);s.setProperty("uiWidth",editorWidth.load(),nullptr);s.setProperty("uiExpanded",editorExpanded.load(),nullptr);
+    early::TargetSummary t;
+    {const juce::SpinLock::ScopedLockType lock(dataLock);t=target;}
+    s.setProperty("targetCount",t.taps.count,nullptr);s.setProperty("targetConfidence",int(t.confidence),nullptr);s.setProperty("targetOnsets",t.onsetCount,nullptr);
     s.setProperty("targetStereoMeasured",t.stereoMeasured,nullptr);s.setProperty("targetStereoWidth",t.stereoWidth,nullptr);s.setProperty("targetUsedDry",t.usedDryReference,nullptr);
     for(int k=0;k<6;++k)s.setProperty("targetTone"+juce::String(k),t.toneDb[size_t(k)],nullptr);
     for(int i=0;i<t.taps.count;++i){const auto&tap=t.taps.taps[size_t(i)];s.setProperty("targetDelay"+juce::String(i),tap.delayMs,nullptr);s.setProperty("targetGain"+juce::String(i),tap.gain,nullptr);s.setProperty("targetPan"+juce::String(i),tap.pan,nullptr);s.setProperty("targetLow"+juce::String(i),tap.lowGain,nullptr);s.setProperty("targetHigh"+juce::String(i),tap.highGain,nullptr);s.setProperty("targetDiffusion"+juce::String(i),tap.diffusionMs,nullptr);s.setProperty("targetSpread"+juce::String(i),tap.stereoSpread,nullptr);s.setProperty("targetDecor"+juce::String(i),tap.decorrelationMs,nullptr);}
-    s.setProperty("learnRefSize",reference.roomSize,nullptr);s.setProperty("learnRefShape",reference.roomShape,nullptr);s.setProperty("learnRefFaces",reference.faces,nullptr);s.setProperty("learnRefWidth",reference.width,nullptr);s.setProperty("learnRefDistance",reference.pattern,nullptr);
     if(auto xml=s.createXml())copyXmlToBinary(*xml,d);
 }
 void EarlyPocketAudioProcessor::setStateInformation(const void* d,int n){
     if(auto x=getXmlFromBinary(d,n))if(x->hasTagName(parameters.state.getType())){
         auto s=juce::ValueTree::fromXml(*x);editorWidth=int(s.getProperty("uiWidth",1100));editorExpanded=bool(s.getProperty("uiExpanded",true));
-        const int version=int(s.getProperty("profileVersion",0));early::TargetSummary t;early::Parameters reference{};bool active=false;
+        const int version=int(s.getProperty("profileVersion",0));early::TargetSummary t;
         if(version>=1){
             t.taps.count=juce::jlimit(0,early::maxTaps,int(s.getProperty("targetCount",0)));t.confidence=early::Confidence(juce::jlimit(0,2,int(s.getProperty("targetConfidence",0))));t.onsetCount=int(s.getProperty("targetOnsets",0));
             t.stereoMeasured=bool(s.getProperty("targetStereoMeasured",false));t.stereoWidth=float(s.getProperty("targetStereoWidth",1.0));t.usedDryReference=version>=2?bool(s.getProperty("targetUsedDry",false)):false;
@@ -220,11 +192,12 @@ void EarlyPocketAudioProcessor::setStateInformation(const void* d,int n){
             auto distanceNode=s.getChildWithProperty("id","distance");
             if(distanceNode.isValid())distanceNode.setProperty("value",100.0f-float(distanceNode.getProperty("value",35.0f)),nullptr);
         }
-        parameters.replaceState(s);
-        if(version>=2){reference.roomSize=float(s.getProperty("learnRefSize",0.45));reference.roomShape=float(s.getProperty("learnRefShape",0.20));reference.faces=juce::jlimit(1,16,int(s.getProperty("learnRefFaces",6)));reference.width=float(s.getProperty("learnRefWidth",1.0));reference.pattern=float(s.getProperty("learnRefDistance",0.35));active=bool(s.getProperty("learnedActive",false))&&t.taps.count>0;}
-        {
-            const juce::SpinLock::ScopedLockType lock(dataLock);target=t;learnedReference=reference;learnedActive=active;++learnedGeneration;
+        for(const char* obsolete:{"eqBypass","eq2Q"}){
+            auto node=s.getChildWithProperty("id",obsolete);
+            if(node.isValid())s.removeChild(node,nullptr);
         }
+        parameters.replaceState(s);
+        {const juce::SpinLock::ScopedLockType lock(dataLock);target=t;}
         if(t.taps.count>0)learnState=LearnState::ready;
     }
 }

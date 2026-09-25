@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <limits>
 
 namespace early {
 namespace {
@@ -23,16 +22,16 @@ std::uint64_t mixHash(std::uint64_t h, int v) noexcept {
 Room makeRoom(const Parameters& p) noexcept {
     const float size = clamp01(p.roomSize);
     const float shape = clamp01(p.roomShape);
-    // The old mapping made the wet reflections earlier and louder at 100%,
-    // which sounded closer. Preserve that useful sound with the UI reversed.
-    const float distance = 1.0f - clamp01(p.pattern);
-    const float scale = 3.0f + 8.5f * std::pow(size, 1.25f);
+    const float distance = clamp01(p.pattern);
+    // Keep the source/listener offset modest as the room expands. Scaling it
+    // with the walls cancelled most of the extra path length in large rooms.
+    const float scale = 3.0f + 43.0f * std::pow(size, 1.65f);
     Room r;
     r.width  = scale * (0.88f + 0.45f * shape);
     r.depth  = scale * (1.12f + 0.65f * shape);
     r.height = 2.45f + 0.23f * scale * (1.0f + 0.30f * shape);
     r.listener = { r.width * 0.50f, r.depth * 0.70f, 1.20f };
-    const float directDistance = r.depth * (0.08f + 0.38f * distance);
+    const float directDistance = std::min(0.7f + 2.5f * distance, r.depth * 0.45f);
     r.source = { r.width * 0.50f,
                  std::max(r.depth * 0.12f, r.listener.y - directDistance),
                  1.20f };
@@ -69,7 +68,8 @@ Tap makePath(Vec3 image, const Room& room, float coefficient, float highGain,
     const Vec3 ray = subtract(image, room.listener);
     const float path = std::max(direct, length(ray));
     const float excess = std::max(0.0f, path - direct);
-    const float delayMs = 1000.0f * excess / speedOfSound;
+    const float delayMs = 1000.0f * excess / speedOfSound
+                        + 18.0f * std::pow(clamp01(p.pattern), 1.4f);
     const float distanceAtt = std::pow((direct + 0.75f) / (path + 0.75f), 0.62f);
     const float orderLoss = order == 1 ? 1.0f : 0.76f;
     const float absolutePathLoss = std::exp(-0.012f * excess);
@@ -80,7 +80,7 @@ Tap makePath(Vec3 image, const Room& room, float coefficient, float highGain,
     const float width = std::clamp(p.width, 0.0f, 2.0f);
     pan = std::tanh(pan * (0.78f + 0.52f * width));
 
-    const float distanceNorm = 1.0f - clamp01(p.pattern);
+    const float distanceNorm = clamp01(p.pattern);
     const float airLoss = std::exp(-0.014f * path * (0.65f + 0.65f * distanceNorm));
     const float spectral = std::clamp(highGain * airLoss, 0.24f, 1.0f);
     const float lateness = clamp01(delayMs / 120.0f);
@@ -137,7 +137,7 @@ void addDiffusePaths(TapModel& model, const Parameters& p,
         specularEnergy += model.taps[size_t(i)].gain * model.taps[size_t(i)].gain;
     }
     const float size = clamp01(p.roomSize);
-    const float duration = 22.0f + 83.0f * size;
+    const float duration = 22.0f + 210.0f * std::pow(size, 1.6f);
     const float baseGain = (0.56f * relativeLevel)
                          * std::sqrt(specularEnergy / float(2 * pairs));
     for (int i = 0; i < pairs; ++i) {
@@ -178,15 +178,6 @@ void fingerprint(TapModel& out) noexcept {
         h = mixHash(h, int(std::lround(t.decorrelationMs * 10000.0f)));
     }
     out.fingerprint = h;
-}
-
-float medianDelay(const TapModel& m) noexcept {
-    if (m.count <= 0) return 20.0f;
-    std::array<float, maxTaps> d{};
-    for (int i=0;i<m.count;++i) d[size_t(i)] = m.taps[size_t(i)].delayMs;
-    std::sort(d.begin(), d.begin()+m.count);
-    const int mid = m.count/2;
-    return (m.count & 1) ? d[size_t(mid)] : 0.5f*(d[size_t(mid-1)] + d[size_t(mid)]);
 }
 
 } // namespace
@@ -256,93 +247,6 @@ TapModel buildModel(const Parameters& p) noexcept {
     sortByDelay(out);
     fingerprint(out);
     return out;
-}
-
-TapModel transformLearnedModel(const TapModel& learned,
-                               const Parameters& current,
-                               const Parameters& learnedReference,
-                               float learnedHighToneDb) noexcept {
-    if (learned.count <= 0) return buildModel(current);
-
-    TapModel out;
-    const int desiredCount = std::clamp(current.faces,1,16);
-    out.count = std::min(desiredCount, learned.count);
-    const float referenceMedian = std::max(1.0f, medianDelay(learned));
-    const float sizeDelta = current.roomSize - learnedReference.roomSize;
-    const float timeScale = std::pow(3.2f, sizeDelta);
-    const float shapeDelta = current.roomShape - learnedReference.roomShape;
-    const float distanceDelta = current.pattern - learnedReference.pattern;
-    const float widthRatio = (0.20f + std::clamp(current.width,0.0f,2.0f))
-                           / (0.20f + std::clamp(learnedReference.width,0.0f,2.0f));
-
-    std::array<int,maxTaps> ids{};
-    for(int i=0;i<learned.count;++i) ids[size_t(i)] = i;
-    for(int i=1;i<learned.count;++i){const int key=ids[size_t(i)];int j=i;while(j>0&&learned.taps[size_t(key)].gain>learned.taps[size_t(ids[size_t(j-1)])].gain){ids[size_t(j)]=ids[size_t(j-1)];--j;}ids[size_t(j)]=key;}
-
-    const float learnedToneGain = std::pow(10.0f, std::clamp(learnedHighToneDb,-18.0f,12.0f)/20.0f);
-    for(int n=0;n<out.count;++n){
-        Tap t=learned.taps[size_t(ids[size_t(n)])];
-        const float normalized = (t.delayMs-referenceMedian)/referenceMedian;
-        const float warp = 1.0f + shapeDelta * 0.22f * std::tanh(normalized);
-        t.delayMs = std::clamp(t.delayMs*timeScale*warp*(1.0f+0.12f*distanceDelta),0.75f,300.0f);
-        t.gain *= std::pow(10.0f, -2.2f*distanceDelta/20.0f)
-                * std::pow(std::max(0.45f,timeScale), -0.28f);
-        t.pan = std::tanh(t.pan * widthRatio);
-        const float baseHigh = t.highGain > 0.0f ? t.highGain : learnedToneGain;
-        t.highGain = std::clamp(baseHigh
-                              * std::pow(10.0f,-4.0f*std::max(0.0f,distanceDelta)/20.0f),0.22f,1.0f);
-        const float late = clamp01(t.delayMs/100.0f);
-        t.diffusionMs = std::clamp(std::max(0.04f,t.diffusionMs)
-                                  *(1.0f+0.90f*std::max(0.0f,distanceDelta)+0.45f*late),0.02f,5.0f);
-        t.stereoSpread = std::clamp(std::max(0.05f,t.stereoSpread)*widthRatio
-                                  *(1.0f-0.35f*std::max(0.0f,distanceDelta)),0.02f,0.45f);
-        t.decorrelationMs = std::clamp(std::max(0.0f,t.decorrelationMs)
-                                     + 0.20f*t.diffusionMs*std::max(0.0f,current.width-0.7f),0.0f,1.5f);
-        t.pathId = 100 + ids[size_t(n)];
-        out.taps[size_t(n)] = t;
-    }
-
-    if(out.count < desiredCount){
-        const auto procedural=buildModel(current);
-        std::array<bool,maxTaps> used{};
-        for(int i=0;i<procedural.count && out.count<desiredCount;++i){
-            Tap extra=procedural.taps[size_t(i)];
-            bool duplicate=false;
-            for(int j=0;j<out.count;++j)duplicate|=std::abs(out.taps[size_t(j)].delayMs-extra.delayMs)<2.5f;
-            if(duplicate)continue;
-            extra.gain*=0.68f;extra.pathId=200+i;used[size_t(i)]=true;
-            out.taps[size_t(out.count++)]=extra;
-        }
-        for(int i=0;i<procedural.count && out.count<desiredCount;++i){
-            if(used[size_t(i)])continue;
-            Tap extra=procedural.taps[size_t(i)];extra.gain*=0.52f;extra.pathId=240+i;
-            out.taps[size_t(out.count++)]=extra;
-        }
-    }
-    addDiffusePaths(out, current);
-    sortByDelay(out);
-    fingerprint(out);
-    return out;
-}
-
-float modelDistance(const TapModel& target, const TapModel& candidate) noexcept {
-    if (target.count == 0 || candidate.count == 0) return 1.0e6f;
-    float cost = 0.25f * float(std::abs(target.count - candidate.count));
-    std::array<bool, maxTaps> used{};
-    for (int i = 0; i < target.count; ++i) {
-        const auto& a = target.taps[size_t(i)];
-        int best = -1; float bestCost = std::numeric_limits<float>::max();
-        for (int j = 0; j < candidate.count; ++j) if (!used[size_t(j)]) {
-            const auto& b = candidate.taps[size_t(j)];
-            const float time = std::abs(std::log((a.delayMs + 1.0f) / (b.delayMs + 1.0f)));
-            const float level = std::abs(a.gain - b.gain);
-            const float spatial = 0.12f * std::abs(a.pan-b.pan);
-            const float c = 2.8f * time + 0.7f * level + spatial;
-            if (c < bestCost) { bestCost = c; best = j; }
-        }
-        if (best >= 0) { used[size_t(best)] = true; cost += bestCost; } else cost += 1.0f;
-    }
-    return cost / float(std::max(target.count, candidate.count));
 }
 
 } // namespace early

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.2
+
+- Expanded large-room geometry; at Room Size 100% the six main paths extend past 200 ms, with the secondary layer reaching toward 300 ms.
+- Reworked Learn as a bounded search over Room Size, Room Shape, Faces and Distance. The resulting knobs alone determine the audible model; Width and EQ are estimated from measured stereo and tone.
+- Allowed a single dry-reference transient to yield a fair Learn fit when multiple reflection arrivals are detected.
+- Removed the EQ bypass switch and user-adjustable Q; the mid EQ uses fixed Q 0.7.
+- Added regression coverage for large-room arrival times and procedural parameter fitting.
+
 ## 0.4.1
 
 - Show the secondary reflection density as a diffuse layer in the graph while drawing only Faces-selected primary paths as lines.

@@ -20,8 +20,7 @@ public:
     void reset();
     void setModel(const TapModel&);
     void setEq(const EqSettings&);
-    std::array<float, 2> process(float left, float right, float mix, bool bypass,
-                                  bool eqBypass = false) noexcept;
+    std::array<float, 2> process(float left, float right, float mix, bool bypass) noexcept;
     int tailSamples() const noexcept;
 
 private:
@@ -67,7 +66,6 @@ private:
     bool eqInitialised = false;
 
     float bypassMix = 0.0f;
-    float eqBypassMix = 0.0f, eqBypassCoeff = 0.0f;
     float mixSmoothed = 0.0f, mixSmoothingCoeff = 0.0f;
     bool mixInitialised = false;
 

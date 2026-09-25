@@ -49,6 +49,30 @@ void testRoomControls() {
     }
 }
 
+void testLargeRoomAndParameterFit() {
+    early::Parameters p;p.faces=6;p.roomSize=1.0f;p.roomShape=0.2f;p.pattern=0.35f;
+    const auto large=early::buildModel(p);
+    float latestPrimary=0.0f;
+    for(int i=0;i<large.count;++i)if(large.taps[size_t(i)].pathId<300)
+        latestPrimary=std::max(latestPrimary,large.taps[size_t(i)].delayMs);
+    assert(latestPrimary>190.0f);
+    p.roomSize=0.0f;
+    const auto small=early::buildModel(p);
+    for(int i=0;i<small.count;++i)if(small.taps[size_t(i)].pathId<300)
+        assert(small.taps[size_t(i)].delayMs<50.0f);
+
+    p.roomSize=0.8f;p.roomShape=0.5f;p.pattern=0.5f;
+    const auto source=early::buildModel(p);
+    early::TargetSummary summary;summary.confidence=early::Confidence::good;
+    for(int i=0;i<source.count;++i)if(source.taps[size_t(i)].pathId<300)
+        summary.taps.taps[size_t(summary.taps.count++)]=source.taps[size_t(i)];
+    early::LearnAnalyzer analyzer;
+    const auto fit=analyzer.fit(summary);
+    assert(fit.valid && fit.error<0.07f);
+    assert(fit.parameters.faces==6);
+    assert(std::abs(fit.parameters.roomSize-p.roomSize)<0.08f);
+}
+
 std::array<double,2> renderImpulse(bool leftInput) {
     constexpr double sr=48000.0;
     early::Engine engine; engine.prepare(sr);
@@ -74,23 +98,6 @@ void testStereoSymmetry() {
     const double scale=std::max({left[0],left[1],right[0],right[1],1.0e-12});
     assert(std::abs(left[0]-right[1])/scale<1.0e-4);
     assert(std::abs(left[1]-right[0])/scale<1.0e-4);
-}
-
-void testEqBypass() {
-    early::TapModel model;model.count=1;model.fingerprint=17;
-    model.taps[0].delayMs=9.0f;model.taps[0].gain=0.8f;
-    model.taps[0].lowGain=1.0f;model.taps[0].highGain=1.0f;
-    early::EqSettings eq;eq.highPassHz=1500.0f;
-    early::Engine on,off;on.prepare(48000.0);off.prepare(48000.0);
-    on.setModel(model);off.setModel(model);on.setEq(eq);off.setEq(eq);
-    double onEnergy=0.0,offEnergy=0.0;
-    for(int n=0;n<24000;++n){
-        const float input=std::sin(2.0f*3.14159265358979323846f*100.0f*float(n)/48000.0f);
-        const auto active=on.process(input,input,1.0f,false,false);
-        const auto bypassed=off.process(input,input,1.0f,false,true);
-        if(n>5000){onEnergy+=double(active[0])*active[0];offEnergy+=double(bypassed[0])*bypassed[0];}
-    }
-    assert(offEnergy>onEnergy*100.0);
 }
 
 void addEcho(const std::vector<float>& dry,std::vector<float>& left,std::vector<float>& right,
@@ -130,9 +137,8 @@ void testLearn() {
         assert(best<1.2f);
     }
     const auto fit=analyzer.fit(summary); assert(fit.valid);
-    auto changed=fit.parameters;changed.faces=16;
-    const auto transformed=early::transformLearnedModel(summary.taps,changed,fit.parameters,0.5f*(summary.toneDb[4]+summary.toneDb[5]));
-    assert(transformed.count>16 && transformed.count<=early::maxTaps);
+    const auto fitted=early::buildModel(fit.parameters);
+    assert(fitted.count>fit.parameters.faces && fitted.count<=early::maxTaps);
 }
 
 void testEngineFiniteAcrossRates() {
@@ -152,4 +158,4 @@ void testEngineFiniteAcrossRates() {
 }
 }
 
-int main(){testModel();testStereoSymmetry();testRoomControls();testEqBypass();testLearn();testEngineFiniteAcrossRates();std::cout<<"EarlyCore tests passed\n";return 0;}
+int main(){testModel();testStereoSymmetry();testRoomControls();testLargeRoomAndParameterFit();testLearn();testEngineFiniteAcrossRates();std::cout<<"EarlyCore tests passed\n";return 0;}

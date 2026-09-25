@@ -1,8 +1,8 @@
-# Early Pocket 0.4.1
+# Early Pocket 0.4.2
 
-Early Pocket is a dedicated early-reflections processor built with JUCE. Version 0.4.0 replaces the original sparse multi-tap model with a true-stereo, geometry-informed early-reflection engine and upgrades Learn so measured reflections can become the actual base model instead of being discarded after fitting.
+Early Pocket is a dedicated early-reflections processor built with JUCE. It uses a true-stereo, geometry-informed early-reflection engine with a quieter secondary layer.
 
-Version 0.4.1 adds quieter, denser secondary reflections and path-specific phase dispersion to reduce short-room coloration. Distance now runs from close (0%) to distant (100%), and Room Shape keeps a centred source and listener with matched left/right wall response. Existing version-2 procedural presets migrate their Distance value when loaded. EQ has a bypass and adjustable mid-band Q. Double-click or Alt-click a main dial, Q control, or EQ node to reset it; Shift-drag an EQ node for fine adjustment. Learn applies a completed fit once with a single model transition.
+Version 0.4.2 lets large rooms produce prominent paths beyond 200 ms while keeping small rooms compact. Distance runs from close (0%) to distant (100%), and Room Shape keeps a centred source and listener with matched left/right wall response. Learn searches the available parameters and then runs the same procedural model as manual control. The EQ has a fixed mid-band Q of 0.7; its bypass button and Q control have been removed. Double-click or Alt-click a main dial or EQ node to reset it; Shift-drag an EQ node for fine adjustment. Older version-2 procedural presets migrate their Distance value when loaded.
 
 Faces sets the number of prominent reflection paths. The processor also creates quieter secondary paths to soften coloration; the graph displays these as a diffuse area behind the individual primary-path lines.
 
@@ -18,11 +18,11 @@ Faces sets the number of prominent reflection paths. The processor also creates 
 - Neutral default post-EQ (180 Hz / 900 Hz / 4.5 kHz, 0 dB).
 - Expensive delay, pan and cluster coefficients are precomputed when the model changes rather than in the sample loop.
 
-## Learn 2
+## Learn
 
 Without a sidechain, Learn performs autonomous analysis of the main/room signal. With the sidechain enabled, the main input is treated as the room/processed recording and the sidechain as the dry reference. The host should present those two paths time-aligned (normal plug-in delay compensation is sufficient); Learn intentionally does not guess arbitrary recording offsets because periodic material can make automatic lag estimation ambiguous. Learn uses transient persistence and whitened normalized correlation at 0.5 ms profile resolution, sub-bin peak interpolation, source-width-compensated stereo analysis and a six-band direct-vs-reflection spectral estimate.
 
-The detected delays, levels, pan, spectral damping and diffusion are retained as a learned base model. After learning, Room Size / Shape / Width / Distance transform that measured model. Increasing Faces beyond the measured tap count supplements it with geometry-generated paths.
+Learn detects reflection arrivals and estimates stereo width and colour, then searches Room Size, Room Shape, Distance and Faces for the closest procedural timing pattern. It sets Width and the three EQ gains from the stereo and spectral measurements. The target is retained only for the grey reference overlay in the graph. A sparse or ambiguous target can be rejected; matching a proprietary reverb pattern exactly is not implied. Older presets with learned taps now render from their saved knob positions instead of an invisible learned response, so their sound may change.
 
 ## Local build
 

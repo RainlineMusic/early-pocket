@@ -34,10 +34,4 @@ struct TapModel {
 };
 
 TapModel buildModel(const Parameters&) noexcept;
-TapModel transformLearnedModel(const TapModel& learned,
-                               const Parameters& current,
-                               const Parameters& learnedReference,
-                               float learnedHighToneDb = 0.0f) noexcept;
-float modelDistance(const TapModel& target, const TapModel& candidate) noexcept;
-
 } // namespace early

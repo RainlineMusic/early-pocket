@@ -36,7 +36,6 @@ void Engine::prepare(double sr, int maximumDelayMs) {
     fadeLength = std::max(1, int(std::lround(rate * 0.025)));
     eqFadeLength = std::max(1, int(std::lround(rate * 0.010)));
     mixSmoothingCoeff = float(std::exp(-1.0 / (rate * 0.008)));
-    eqBypassCoeff = float(std::exp(-1.0 / (rate * 0.010)));
     reset();
     setEq({});
 }
@@ -47,7 +46,6 @@ void Engine::reset() {
     fadeRemaining = 0;
     eqFadeRemaining = 0;
     bypassMix = 0.0f;
-    eqBypassMix = 0.0f;
     mixSmoothed = 0.0f;
     mixInitialised = false;
     currentState = {};
@@ -203,8 +201,7 @@ std::array<float,2> Engine::applyFilters(std::array<StereoFilter,5>& bank,
     return x;
 }
 
-std::array<float,2> Engine::process(float l,float r,float mix,bool bypass,
-                                    bool eqBypass) noexcept {
+std::array<float,2> Engine::process(float l,float r,float mix,bool bypass) noexcept {
     if (delay.empty()) return {l,r};
     delay[size_t(write)] = {l,r};
 
@@ -225,10 +222,6 @@ std::array<float,2> Engine::process(float l,float r,float mix,bool bypass,
         filtered[1] = old[1] + x*(filtered[1]-old[1]);
         --eqFadeRemaining;
     }
-    const float eqTarget = eqBypass ? 1.0f : 0.0f;
-    eqBypassMix = eqTarget + eqBypassCoeff * (eqBypassMix - eqTarget);
-    filtered[0] += eqBypassMix * (wet[0] - filtered[0]);
-    filtered[1] += eqBypassMix * (wet[1] - filtered[1]);
 
     write = (write + 1) % int(delay.size());
 

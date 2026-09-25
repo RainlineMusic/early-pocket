@@ -183,7 +183,7 @@ TargetSummary LearnAnalyzer::analyze(const float* roomLeft, const float* roomRig
         for(int n=0;n<templateLength;++n){const float x=whitened(onsetLeft,onsetRight,anchor+n);directEnergy+=double(x)*x;}
         if(directEnergy<1.0e-10) continue;
         ++usableOnsets;
-        for(int k=14;k<profileBins;++k) {
+        for(int k=3;k<profileBins;++k) {
             const int nominal=int(std::lround(msToSamples(float(k)*profileBinMs,sampleRate)));
             float best=0.0f;
             for(int shift=-searchRadius;shift<=searchRadius;shift+=shiftStep) {
@@ -205,7 +205,7 @@ TargetSummary LearnAnalyzer::analyze(const float* roomLeft, const float* roomRig
     if(usableOnsets==0) return result;
 
     std::array<float,profileBins> profile{},smooth{};
-    for(int k=14;k<profileBins;++k) {
+    for(int k=3;k<profileBins;++k) {
         const auto& values=scores[size_t(k)];
         if(values.empty()) continue;
         const float mean=std::accumulate(values.begin(),values.end(),0.0f)/float(values.size());
@@ -214,12 +214,12 @@ TargetSummary LearnAnalyzer::analyze(const float* roomLeft, const float* roomRig
     for(int k=16;k<profileBins-2;++k)
         smooth[size_t(k)]=(profile[size_t(k-2)]+2.0f*profile[size_t(k-1)]+3.0f*profile[size_t(k)]
                           +2.0f*profile[size_t(k+1)]+profile[size_t(k+2)])/9.0f;
-    const float maximum=*std::max_element(smooth.begin()+16,smooth.end()-16);
+    const float maximum=*std::max_element(smooth.begin()+3,smooth.end()-16);
     std::vector<Peak> candidates;
-    const int startBin=14;
-    for(int k=std::max(startBin+3,12);k<profileBins-12;++k) {
+    const int startBin=3;
+    for(int k=startBin+1;k<profileBins-12;++k) {
         const float value=smooth[size_t(k)];
-        const int shoulderBins=int(std::lround(6.0f/profileBinMs));
+        const int shoulderBins=std::min(k-2,int(std::lround(6.0f/profileBinMs)));
         const float shoulder=0.5f*(smooth[size_t(k-shoulderBins)]+smooth[size_t(k+shoulderBins)]);
         if(value>=smooth[size_t(k-1)]&&value>smooth[size_t(k+1)]
            &&value>=std::max(0.055f,maximum*0.15f)&&value-shoulder>=0.018f) {
@@ -230,7 +230,7 @@ TargetSummary LearnAnalyzer::analyze(const float* roomLeft, const float* roomRig
     std::sort(candidates.begin(),candidates.end(),[](const Peak&a,const Peak&b){return a.score>b.score;});
     std::vector<Peak> selected;
     for(const auto& c:candidates) {
-        if(std::none_of(selected.begin(),selected.end(),[&](const Peak&p){return std::abs(p.timeMs-c.timeMs)<3.2f;})) selected.push_back(c);
+        if(std::none_of(selected.begin(),selected.end(),[&](const Peak&p){return std::abs(p.timeMs-c.timeMs)<(c.timeMs<10.0f?1.1f:3.2f);})) selected.push_back(c);
         if(selected.size()>=16u) break;
     }
     std::sort(selected.begin(),selected.end(),[](const Peak&a,const Peak&b){return a.timeMs<b.timeMs;});
@@ -292,6 +292,7 @@ TargetSummary LearnAnalyzer::analyze(const float* roomLeft, const float* roomRig
 
     const float topScore=candidates.empty()?0.0f:candidates.front().score;
     if(result.taps.count>=2&&usableOnsets>=3&&topScore>=0.10f) result.confidence=Confidence::good;
+    else if(hasDry&&result.taps.count>=2&&topScore>=0.055f) result.confidence=Confidence::fair;
     else if(result.taps.count>=1&&topScore>=0.13f) result.confidence=Confidence::fair;
     return result;
 }
@@ -299,33 +300,78 @@ TargetSummary LearnAnalyzer::analyze(const float* roomLeft, const float* roomRig
 FitResult LearnAnalyzer::fit(const TargetSummary& target) const {
     FitResult fit;
     if(target.taps.count<1||target.confidence==Confidence::weak) return fit;
-    fit.parameters.faces=std::clamp(target.taps.count,1,16);
-
-    std::array<float,maxTaps> delays{};
-    for(int i=0;i<target.taps.count;++i) delays[size_t(i)]=target.taps.taps[size_t(i)].delayMs;
-    std::sort(delays.begin(),delays.begin()+target.taps.count);
-    const int mid=target.taps.count/2;
-    const float med=(target.taps.count&1)?delays[size_t(mid)]:0.5f*(delays[size_t(mid-1)]+delays[size_t(mid)]);
-    fit.parameters.roomSize=std::clamp(float(std::log(std::max(4.0f,med)/8.0f)/std::log(7.0f)),0.0f,1.0f);
-
-    if(target.taps.count>=3) {
-        float mean=0.0f;
-        for(int i=1;i<target.taps.count;++i) mean+=delays[size_t(i)]-delays[size_t(i-1)];
-        mean/=float(target.taps.count-1);
-        float variance=0.0f;
-        for(int i=1;i<target.taps.count;++i){const float d=(delays[size_t(i)]-delays[size_t(i-1)])-mean;variance+=d*d;}
-        variance/=float(target.taps.count-1);
-        const float cv=std::sqrt(variance)/std::max(0.5f,mean);
-        fit.parameters.roomShape=std::clamp((cv-0.15f)/0.75f,0.0f,1.0f);
-    } else fit.parameters.roomShape=0.45f;
-
     fit.parameters.width=target.stereoMeasured?std::clamp(target.stereoWidth,0.0f,2.0f):1.0f;
     const float high=0.5f*(target.toneDb[4]+target.toneDb[5]);
-    fit.parameters.pattern=std::clamp((-high+2.0f)/14.0f,0.0f,1.0f);
+    const float tonalDistance=std::clamp((-high+2.0f)/14.0f,0.0f,1.0f);
+    // Match the measured arrival pattern to the actual procedural model.
+    // Quiet diffuse taps are excluded: Faces controls the prominent paths.
+    const auto score=[&](const Parameters& p) {
+        const auto model=buildModel(p);
+        std::array<float,16> times{};
+        int count=0;
+        for(int i=0;i<model.count;++i)
+            if(model.taps[size_t(i)].pathId<300) times[size_t(count++)]=model.taps[size_t(i)].delayMs;
+        float cost=0.0f, weight=0.0f;
+        float maxGain=0.0f, targetFirst=300.0f, targetLast=0.0f;
+        for(int i=0;i<target.taps.count;++i){
+            const auto& t=target.taps.taps[size_t(i)];
+            maxGain=std::max(maxGain,std::abs(t.gain));
+            targetFirst=std::min(targetFirst,t.delayMs);
+            targetLast=std::max(targetLast,t.delayMs);
+        }
+        for(int i=0;i<target.taps.count;++i){
+            const auto& t=target.taps.taps[size_t(i)];
+            const float w=0.35f+0.65f*std::sqrt(std::abs(t.gain)/std::max(0.01f,maxGain));
+            float best=300.0f;
+            for(int j=0;j<count;++j) best=std::min(best,std::abs(t.delayMs-times[size_t(j)]));
+            cost+=w*std::min(3.0f,best/(9.0f+0.22f*t.delayMs));weight+=w;
+        }
+        cost/=std::max(0.01f,weight);
+        float reverse=0.0f;
+        for(int j=0;j<count;++j){
+            float best=300.0f;
+            for(int i=0;i<target.taps.count;++i)
+                best=std::min(best,std::abs(times[size_t(j)]-target.taps.taps[size_t(i)].delayMs));
+            reverse+=std::min(3.0f,best/(9.0f+0.22f*times[size_t(j)]));
+        }
+        cost+=0.38f*reverse/float(std::max(1,count));
+        cost+=0.045f*float(std::abs(count-target.taps.count));
+        cost+=0.27f*std::abs(times[0]-targetFirst)/(10.0f+0.25f*targetFirst);
+        cost+=0.20f*std::abs(times[size_t(count-1)]-targetLast)/(12.0f+0.25f*targetLast);
+        cost+=0.035f*std::abs(p.pattern-tonalDistance);
+        return cost;
+    };
+    fit.error=std::numeric_limits<float>::max();
+    const int targetFaces=std::clamp(target.taps.count,1,16);
+    const auto tryFit=[&](Parameters candidate){
+        candidate.roomSize=std::clamp(candidate.roomSize,0.0f,1.0f);
+        candidate.roomShape=std::clamp(candidate.roomShape,0.0f,1.0f);
+        candidate.pattern=std::clamp(candidate.pattern,0.0f,1.0f);
+        candidate.faces=std::clamp(candidate.faces,1,16);
+        const float error=score(candidate);
+        if(error<fit.error){fit.error=error;fit.parameters=candidate;}
+    };
+    for(int faces=std::max(1,targetFaces-2);faces<=std::min(16,targetFaces+2);++faces)
+        for(int size=0;size<=10;++size)
+            for(int shape=0;shape<=4;++shape)
+                for(int distance=0;distance<=4;++distance){
+                    Parameters p;p.faces=faces;p.width=fit.parameters.width;
+                    p.roomSize=float(size)*0.1f;p.roomShape=float(shape)*0.25f;
+                    p.pattern=float(distance)*0.25f;tryFit(p);
+                }
+    for(int step=0;step<2;++step){
+        const Parameters best=fit.parameters;
+        const float delta=step==0?0.05f:0.025f;
+        for(int f=-1;f<=1;++f)for(int s=-1;s<=1;++s)
+            for(int sh=-1;sh<=1;++sh)for(int d=-1;d<=1;++d){
+                Parameters p=best;p.faces+=f;p.roomSize+=delta*float(s);
+                p.roomShape+=delta*2.0f*float(sh);p.pattern+=delta*2.0f*float(d);
+                tryFit(p);
+            }
+    }
     fit.eqGainDb[0]=std::clamp(0.20f*(target.toneDb[0]+target.toneDb[1]),-4.0f,4.0f);
     fit.eqGainDb[1]=std::clamp(0.18f*(target.toneDb[2]+target.toneDb[3]),-4.0f,4.0f);
     fit.eqGainDb[2]=std::clamp(0.20f*(target.toneDb[4]+target.toneDb[5]),-5.0f,4.0f);
-    fit.error=0.0f;
     fit.valid=true;
     return fit;
 }
