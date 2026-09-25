@@ -36,6 +36,7 @@ void Engine::prepare(double sr, int maximumDelayMs) {
     fadeLength = std::max(1, int(std::lround(rate * 0.025)));
     eqFadeLength = std::max(1, int(std::lround(rate * 0.010)));
     mixSmoothingCoeff = float(std::exp(-1.0 / (rate * 0.008)));
+    balanceCoeff = float(std::exp(-1.0 / (rate * 4.0)));
     reset();
     setEq({});
 }
@@ -46,6 +47,8 @@ void Engine::reset() {
     fadeRemaining = 0;
     eqFadeRemaining = 0;
     bypassMix = 0.0f;
+    inputLeftEnergy = inputRightEnergy = wetLeftEnergy = wetRightEnergy = 0.0f;
+    balanceSamples = 0;
     mixSmoothed = 0.0f;
     mixInitialised = false;
     currentState = {};
@@ -86,6 +89,10 @@ float Engine::readDelay(int channel, const DelayRead& d) const noexcept {
 Engine::RenderModel Engine::makeRenderModel(const TapModel& model) const noexcept {
     RenderModel out;
     out.count = std::clamp(model.count, 0, maxTaps);
+    out.stereoWidth = std::clamp(model.stereoWidth,0.0f,2.0f);
+    out.widthGain = std::min(1.0f,4.0f*out.stereoWidth)
+                  * (1.0f + 0.8f*out.stereoWidth);
+    out.outputGain = invSqrt2 / std::sqrt(1.0f+0.075f*out.stereoWidth*out.stereoWidth);
     out.fingerprint = model.fingerprint;
 
     for (int i = 0; i < out.count; ++i) {
@@ -96,7 +103,7 @@ Engine::RenderModel Engine::makeRenderModel(const TapModel& model) const noexcep
         tap.lowGain = std::clamp(source.lowGain, 0.0f, 1.5f);
         tap.highGain = std::clamp(source.highGain, 0.0f, 1.5f);
         tap.lowAlpha = 1.0f - std::exp(-2.0f*3.14159265358979323846f*1850.0f/float(rate));
-        tap.dispersive = source.pathId < 300;
+        tap.dispersive = source.pathId < 300 && source.diffusionMs > 0.0f;
         if (tap.dispersive) {
             const unsigned id = unsigned(source.pathId + 47);
             const unsigned hash = (id * 1664525u + 1013904223u) ^ (id * 2246822519u);
@@ -187,8 +194,12 @@ std::array<float,2> Engine::render(const RenderModel& m,
         wet[0] += t.gain * (colouredL*t.gLL + colouredR*t.gRL);
         wet[1] += t.gain * (colouredL*t.gLR + colouredR*t.gRR);
     }
-    wet[0] *= invSqrt2;
-    wet[1] *= invSqrt2;
+    // The panned paths above produce the lateral signal. The user Width
+    // control sets its level without adding a permanent L/R gain offset.
+    const float mid = 0.5f * (wet[0] + wet[1]);
+    const float side = 0.5f * (wet[0] - wet[1]) * m.widthGain;
+    wet[0] = (mid + side) * m.outputGain;
+    wet[1] = (mid - side) * m.outputGain;
     return wet;
 }
 
@@ -212,6 +223,23 @@ std::array<float,2> Engine::process(float l,float r,float mix,bool bypass) noexc
         wet[0] = old[0] + x*(wet[0]-old[0]);
         wet[1] = old[1] + x*(wet[1]-old[1]);
         --fadeRemaining;
+    }
+
+    const float a=1.0f-balanceCoeff;
+    inputLeftEnergy += a*(l*l-inputLeftEnergy);
+    inputRightEnergy += a*(r*r-inputRightEnergy);
+    wetLeftEnergy += a*(wet[0]*wet[0]-wetLeftEnergy);
+    wetRightEnergy += a*(wet[1]*wet[1]-wetRightEnergy);
+    balanceSamples=std::min(balanceSamples+1,int(rate));
+    if (current.stereoWidth>0.0f && balanceSamples>int(rate*0.08)
+        && inputLeftEnergy>1.0e-9f && inputRightEnergy>1.0e-9f
+        && wetLeftEnergy>1.0e-9f && wetRightEnergy>1.0e-9f) {
+        // Match the source's long-term L/R level; preserve the width and
+        // per-reflection lateral timing. Limit the correction to 3 dB/side.
+        const float energyRatio=(inputLeftEnergy*wetRightEnergy)
+                                /(inputRightEnergy*wetLeftEnergy);
+        const float gain=std::clamp(std::sqrt(std::sqrt(energyRatio)),0.708f,1.413f);
+        wet[0]*=gain;wet[1]/=gain;
     }
 
     auto filtered = applyFilters(filters, wet);

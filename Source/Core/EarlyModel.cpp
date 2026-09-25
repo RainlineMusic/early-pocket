@@ -149,8 +149,12 @@ void addDiffusePaths(TapModel& model, const Parameters& p,
         const float gain = sign * baseGain * (1.16f - 0.42f * u);
         for (int side = 0; side < 2; ++side) {
             Tap t;
-            t.delayMs = centre + (side == 0 ? -0.19f : 0.19f)
-                        * (0.4f + hashUnit(0x913bu + std::uint32_t(i)));
+            // Alternate which side leads. Paired energy remains balanced while
+            // non-simultaneous lateral arrivals create actual stereo width.
+            const float lateralOffset = (0.18f + 1.5f * std::clamp(p.width,0.0f,2.0f))
+                                      * (0.35f + 0.65f * u);
+            const float lead = (i & 1) ? -1.0f : 1.0f;
+            t.delayMs = centre + (side == 0 ? -lead : lead) * lateralOffset;
             t.gain = gain;
             t.pan = side == 0 ? -pan : pan;
             t.pathId = 300 + 2 * i + side;
@@ -166,6 +170,7 @@ void addDiffusePaths(TapModel& model, const Parameters& p,
 void fingerprint(TapModel& out) noexcept {
     std::uint64_t h = 1469598103934665603ull;
     h = mixHash(h, out.count);
+    h = mixHash(h, int(std::lround(out.stereoWidth * 10000.0f)));
     for (int i = 0; i < out.count; ++i) {
         const auto& t = out.taps[size_t(i)];
         h = mixHash(h, int(std::lround(t.delayMs * 1000.0f)));
@@ -184,6 +189,7 @@ void fingerprint(TapModel& out) noexcept {
 
 TapModel buildModel(const Parameters& p) noexcept {
     TapModel out;
+    out.stereoWidth = std::clamp(p.width,0.0f,2.0f);
     const int faces = std::clamp(p.faces, 1, 16);
     const float shape = clamp01(p.roomShape);
     const Room room = makeRoom(p);
@@ -236,11 +242,31 @@ TapModel buildModel(const Parameters& p) noexcept {
             out.taps[size_t(out.count++)] = second[size_t(i)].tap;
     }
 
+    // Image-source left/right wall pairs have the same geometric delay when
+    // source and listener are centred. Mild path-length variation avoids a
+    // perfectly coincident pair without shifting its mean arrival time.
+    const float wallOffset = (0.4f + 2.3f * out.stereoWidth)
+                           * (0.10f + 0.90f * clamp01(p.roomSize));
+    for (int i=0;i<out.count;++i) {
+        auto& tap=out.taps[size_t(i)];
+        if (tap.pathId==0 || tap.pathId==1)
+            tap.delayMs=std::clamp(tap.delayMs+(tap.pathId==0?-wallOffset:wallOffset),0.75f,300.0f);
+    }
+
     float energy = 0.0f;
     for (int i=0;i<out.count;++i) energy += out.taps[size_t(i)].gain*out.taps[size_t(i)].gain;
     const float scale = energy > 1.35f*1.35f ? 1.35f/std::sqrt(energy) : 1.0f;
     const float sparseReduction = 0.45f + 0.55f * clamp01(p.roomSize);
     for (int i=0;i<out.count;++i) out.taps[size_t(i)].gain *= 0.62f * scale * sparseReduction;
+
+    // The first wavefront stays sharp; the following paths carry dispersion.
+    if (out.count>0) {
+        int first=0;
+        for(int i=1;i<out.count;++i)
+            if(out.taps[size_t(i)].delayMs<out.taps[size_t(first)].delayMs)first=i;
+        out.taps[size_t(first)].diffusionMs=0.0f;
+        out.taps[size_t(first)].decorrelationMs=0.0f;
+    }
 
     // Small rooms need weaker specular paths relative to the diffuse layer.
     addDiffusePaths(out, p, 1.0f / sparseReduction);

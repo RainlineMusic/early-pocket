@@ -30,6 +30,7 @@ struct Tap {
 struct TapModel {
     std::array<Tap, maxTaps> taps{};
     int count = 0;
+    float stereoWidth = 1.0f;
     std::uint64_t fingerprint = 0;
 };
 

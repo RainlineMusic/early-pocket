@@ -1,8 +1,12 @@
-# Early Pocket 0.4.2
+# Early Pocket 0.4.3
 
 Early Pocket is a dedicated early-reflections processor built with JUCE. It uses a true-stereo, geometry-informed early-reflection engine with a quieter secondary layer.
 
+Version 0.4.3 gives Width a much larger audible range: 0% folds the reflections to mono, 100% yields a broad stereo response, and 200% emphasizes laterally arriving energy. The left and right wall responses retain equal nominal level, while slightly different path lengths prevent their stereo contributions from cancelling. Slow L/R correction follows the source's long-term channel balance. The earliest prominent arrival stays crisp; subsequent arrivals keep the phase dispersion used to reduce combing. A small gain adjustment limits the added side energy at high Width.
+
 Version 0.4.2 lets large rooms produce prominent paths beyond 200 ms while keeping small rooms compact. Distance runs from close (0%) to distant (100%), and Room Shape keeps a centred source and listener with matched left/right wall response. Learn searches the available parameters and then runs the same procedural model as manual control. The EQ has a fixed mid-band Q of 0.7; its bypass button and Q control have been removed. Double-click or Alt-click a main dial or EQ node to reset it; Shift-drag an EQ node for fine adjustment. Older version-2 procedural presets migrate their Distance value when loaded.
+
+The spatial design follows the measured role of early lateral reflections in apparent source width (Barron and Marshall, *Journal of Sound and Vibration* 77, 1981, DOI: 10.1016/S0022-460X(81)80020-X), and the perceptual dominance of the first arriving wavefront (Brown, Stecker and Tollin, *Journal of the Association for Research in Otolaryngology* 16, 2015, DOI: 10.1007/s10162-014-0496-2). Bradley, Reich and Norcross (*JASA* 108, 2000, DOI: 10.1121/1.429597) distinguish the broadening associated with early lateral arrivals from later envelopment. These results motivate the lateral arrival pattern and the crisp first reflection; they do not specify the proprietary VSS3 processing.
 
 Faces sets the number of prominent reflection paths. The processor also creates quieter secondary paths to soften coloration; the graph displays these as a diffuse area behind the individual primary-path lines.
 

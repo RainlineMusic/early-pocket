@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.3
+
+- Reworked Width so 100% creates a wider reflection field and 200% brings strong lateral energy without an intentional fixed L/R gain offset.
+- Gave opposite walls different but paired arrival times, and alternated the leading side of secondary reflection pairs.
+- Added slow source-relative L/R energy matching for programme material and modest output gain compensation at high Width.
+- Kept the first prominent wavefront undiffused and un-dispersed to preserve attack definition; later reflections retain decorrelation.
+- Added mono balance, Width progression and first-arrival regression coverage.
+
 ## 0.4.2
 
 - Expanded large-room geometry; at Room Size 100% the six main paths extend past 200 ms, with the secondary layer reaching toward 300 ms.

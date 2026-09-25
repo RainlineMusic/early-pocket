@@ -51,6 +51,8 @@ private:
     struct RenderModel {
         std::array<RenderTap, maxTaps> taps{};
         int count = 0;
+        float stereoWidth = 1.0f;
+        float widthGain = 1.0f, outputGain = 0.70710678f;
         std::uint64_t fingerprint = 0;
         float tailMs = 0.0f;
     };
@@ -66,6 +68,10 @@ private:
     bool eqInitialised = false;
 
     float bypassMix = 0.0f;
+    float balanceCoeff = 0.0f;
+    float inputLeftEnergy = 0.0f, inputRightEnergy = 0.0f;
+    float wetLeftEnergy = 0.0f, wetRightEnergy = 0.0f;
+    int balanceSamples = 0;
     float mixSmoothed = 0.0f, mixSmoothingCoeff = 0.0f;
     bool mixInitialised = false;
 

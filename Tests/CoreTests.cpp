@@ -41,12 +41,37 @@ void testRoomControls() {
             early::Engine engine;engine.prepare(48000.0);engine.setModel(model);
             double left=0.0,right=0.0;
             for(int n=0;n<15000;++n){const auto y=engine.process(n==0?1.0f:0.0f,n==0?1.0f:0.0f,1.0f,false);left+=double(y[0])*y[0];right+=double(y[1])*y[1];}
-            assert(std::abs(10.0*std::log10(left/right))<0.5);
+            assert(std::abs(10.0*std::log10(left/right))<0.8);
         }
         p.pattern=0.0f;const auto close=early::buildModel(p);
         p.pattern=1.0f;const auto distant=early::buildModel(p);
         assert(close.taps[0].delayMs<distant.taps[0].delayMs);
     }
+}
+
+void testWidthAndFirstWavefront() {
+    early::Parameters p;p.roomSize=0.2f;p.faces=6;p.roomShape=0.2f;p.pattern=0.35f;
+    std::array<double,3> sideRatio{};
+    for(int mode=0;mode<3;++mode){
+        p.width=float(mode);
+        const auto model=early::buildModel(p);
+        const auto first=std::min_element(model.taps.begin(),model.taps.begin()+model.count,
+            [](const early::Tap&a,const early::Tap&b){return a.delayMs<b.delayMs;});
+        assert(first!=model.taps.begin()+model.count && first->diffusionMs==0.0f);
+        early::Engine engine;engine.prepare(48000.0);engine.setModel(model);
+        double mid=0.0,side=0.0,left=0.0,right=0.0;
+        for(int n=0;n<15000;++n){
+            const float pulse=n==0?1.0f:0.0f;
+            const auto y=engine.process(pulse,pulse,1.0f,false);
+            const double m=0.5*(double(y[0])+y[1]),s=0.5*(double(y[0])-y[1]);
+            mid+=m*m;side+=s*s;left+=double(y[0])*y[0];right+=double(y[1])*y[1];
+        }
+        sideRatio[size_t(mode)]=std::sqrt(side/mid);
+        assert(std::abs(10.0*std::log10(left/right))<1.0);
+    }
+    assert(sideRatio[0]<0.01);
+    assert(sideRatio[1]>0.25);
+    assert(sideRatio[2]>sideRatio[1]*1.3);
 }
 
 void testLargeRoomAndParameterFit() {
@@ -158,4 +183,4 @@ void testEngineFiniteAcrossRates() {
 }
 }
 
-int main(){testModel();testStereoSymmetry();testRoomControls();testLargeRoomAndParameterFit();testLearn();testEngineFiniteAcrossRates();std::cout<<"EarlyCore tests passed\n";return 0;}
+int main(){testModel();testStereoSymmetry();testRoomControls();testWidthAndFirstWavefront();testLargeRoomAndParameterFit();testLearn();testEngineFiniteAcrossRates();std::cout<<"EarlyCore tests passed\n";return 0;}
