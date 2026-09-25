@@ -35,6 +35,9 @@ void testRoomControls() {
         for(float distance:{0.0f,0.5f,1.0f}) {
             p.pattern=distance;
             const auto model=early::buildModel(p);
+            const int primary=std::count_if(model.taps.begin(),model.taps.begin()+model.count,
+                                            [](const early::Tap& t){return t.pathId<300;});
+            assert(primary==p.faces);
             early::Engine engine;engine.prepare(48000.0);engine.setModel(model);
             double left=0.0,right=0.0;
             for(int n=0;n<15000;++n){const auto y=engine.process(n==0?1.0f:0.0f,n==0?1.0f:0.0f,1.0f,false);left+=double(y[0])*y[0];right+=double(y[1])*y[1];}

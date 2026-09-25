@@ -100,12 +100,36 @@ void ModernDial::paint(juce::Graphics& g){
 void ReflectionsGraph::paint(juce::Graphics& g){
     const auto all=getLocalBounds().toFloat();g.setColour(juce::Colour(0xff111111));g.fillRoundedRectangle(all,14.f);
     const juce::Rectangle<float> p(all.getX()+76.f,all.getY()+58.f,all.getWidth()-102.f,all.getHeight()-112.f);
-    text(g,"EARLY REFLECTIONS",{all.getX()+32,all.getY()+15,300,26},16,juce::Colour(0xfff0f0f0));text(g,"IMPULSE RESPONSE",{all.getRight()-330,all.getY()+15,300,26},14,juce::Colour(0xffa7a7a7),juce::Justification::centredRight);
+    text(g,"EARLY REFLECTIONS",{all.getX()+32,all.getY()+15,300,26},16,juce::Colour(0xfff0f0f0));text(g,"PRIMARY PATHS + DIFFUSE LAYER",{all.getRight()-400,all.getY()+15,370,26},14,juce::Colour(0xffa7a7a7),juce::Justification::centredRight);
     g.setColour(juce::Colour(0xff363636));for(int i=0;i<=6;++i){const float x=p.getX()+p.getWidth()*float(i)/6;g.drawVerticalLine(juce::roundToInt(x),p.getY(),p.getBottom());text(g,i==0?"0 ms":juce::String(i*50),{x-24,p.getBottom()+6,48,18},14,juce::Colour(0xffa7a7a7),juce::Justification::centred);}
     for(int i=0;i<=3;++i){const float y=p.getY()+p.getHeight()*float(i)/3;g.drawHorizontalLine(juce::roundToInt(y),p.getX(),p.getRight());text(g,i==0?"0 dB":juce::String(-i*20),{all.getX()+12,y-9,52,18},14,juce::Colour(0xffa7a7a7),juce::Justification::centredRight);}
-    auto draw=[&](const early::TapModel& model,juce::Colour colour,float width,float scale){g.setColour(colour);for(int i=0;i<model.count;++i){const auto& t=model.taps[size_t(i)];const float db=juce::Decibels::gainToDecibels(std::abs(t.gain)*scale,-60.f);if(db<=-60.f)continue;const float x=p.getX()+p.getWidth()*juce::jlimit(0.f,1.f,t.delayMs/300.f);const float y=juce::jmap(juce::jlimit(-60.f,0.f,db),0.f,-60.f,p.getY(),p.getBottom());g.drawLine(x,p.getBottom(),x,y,width);}};
+    auto draw=[&](const early::TapModel& model,juce::Colour colour,float width,float scale){g.setColour(colour);for(int i=0;i<model.count;++i){const auto& t=model.taps[size_t(i)];if(t.pathId>=300)continue;const float db=juce::Decibels::gainToDecibels(std::abs(t.gain)*scale,-60.f);if(db<=-60.f)continue;const float x=p.getX()+p.getWidth()*juce::jlimit(0.f,1.f,t.delayMs/300.f);const float y=juce::jmap(juce::jlimit(-60.f,0.f,db),0.f,-60.f,p.getY(),p.getBottom());g.drawLine(x,p.getBottom(),x,y,width);}};
+    auto drawDiffuse=[&](const early::TapModel& model,float scale){
+        std::array<float,301> energy{};
+        bool hasDiffuse=false;
+        for(int i=0;i<model.count;++i){
+            const auto& tap=model.taps[size_t(i)];
+            if(tap.pathId<300)continue;
+            hasDiffuse=true;
+            const int centre=juce::jlimit(0,300,juce::roundToInt(tap.delayMs));
+            for(int ms=juce::jmax(0,centre-15);ms<=juce::jmin(300,centre+15);++ms){
+                const float dt=float(ms)-tap.delayMs;
+                energy[size_t(ms)]+=tap.gain*tap.gain*std::exp(-0.5f*dt*dt/25.f);
+            }
+        }
+        if(!hasDiffuse)return;
+        juce::Path cloud;
+        cloud.startNewSubPath(p.getX(),p.getBottom());
+        for(int ms=0;ms<=300;++ms){
+            const float db=juce::Decibels::gainToDecibels(std::sqrt(energy[size_t(ms)])*scale,-60.f);
+            const float y=juce::jmap(juce::jlimit(-60.f,0.f,db),0.f,-60.f,p.getY(),p.getBottom());
+            cloud.lineTo(p.getX()+p.getWidth()*float(ms)/300.f,y);
+        }
+        cloud.lineTo(p.getRight(),p.getBottom());cloud.closeSubPath();
+        g.setColour(juce::Colour(0x448f8f8f));g.fillPath(cloud);
+    };
     const float m=processor.parameters.getRawParameterValue("mix")->load()*.01f;if(m<.999f){const float db=juce::Decibels::gainToDecibels(1.f-m,-60.f);const float y=juce::jmap(db,0.f,-60.f,p.getY(),p.getBottom());g.setColour(juce::Colour(0xfff0f0f0));g.drawLine(p.getX(),p.getBottom(),p.getX(),y,1.8f);}
-    const auto target=processor.getTargetSummary();if(target.taps.count>0)draw(target.taps,juce::Colour(0x668f8f8f),1.f,m);draw(processor.getDisplayedModel(),juce::Colour(0xfff0f0f0),2.f,m);
+    const auto target=processor.getTargetSummary();if(target.taps.count>0)draw(target.taps,juce::Colour(0x668f8f8f),1.f,m);const auto model=processor.getDisplayedModel();drawDiffuse(model,m);draw(model,juce::Colour(0xfff0f0f0),2.f,m);
 }
 
 EqualizerGraph::EqualizerGraph(EarlyPocketAudioProcessor& p):processor(p){}

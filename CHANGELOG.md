@@ -2,6 +2,7 @@
 
 ## 0.4.1
 
+- Show the secondary reflection density as a diffuse layer in the graph while drawing only Faces-selected primary paths as lines.
 - Reduced specular reflection level in small rooms, added a quiet paired diffusion layer and path-specific all-pass dispersion.
 - Corrected Distance direction and removed Room Shape's left/right energy bias.
 - Added an EQ bypass, adjustable mid-band Q, precise Shift-drag and default reset by Alt-click or double-click.
